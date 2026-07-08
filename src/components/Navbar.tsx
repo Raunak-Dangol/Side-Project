@@ -1,0 +1,95 @@
+"use client";
+
+import Link from "next/link";
+import { useEffect, useState } from "react";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import type { Profile } from "@/lib/types";
+
+export default function Navbar() {
+  const supabase = createSupabaseBrowserClient();
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user && mounted) {
+        const { data } = await supabase
+          .from("profiles")
+          .select("*")
+          .eq("id", user.id)
+          .single();
+        if (mounted) setProfile((data as Profile) ?? null);
+      }
+      if (mounted) setLoading(false);
+    })();
+
+    const { data: sub } = supabase.auth.onAuthStateChange(() => {
+      // reload profile on sign-in/out
+      window.location.reload();
+    });
+    return () => {
+      mounted = false;
+      sub.subscription.unsubscribe();
+    };
+  }, [supabase]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
+    window.location.href = "/";
+  }
+
+  return (
+    <header className="border-b border-slate-200 bg-white">
+      <div className="mx-auto max-w-6xl px-4 py-3 flex items-center justify-between">
+        <Link href="/" className="flex items-center gap-2 font-semibold">
+          <span className="inline-block h-6 w-6 rounded bg-brand-600" />
+          Live Shop
+        </Link>
+        <nav className="flex items-center gap-1 text-sm">
+          <Link href="/" className="px-3 py-1.5 rounded hover:bg-slate-100">
+            Streams
+          </Link>
+          {profile?.role === "seller" || profile?.role === "admin" ? (
+            <>
+              <Link
+                href="/seller/dashboard"
+                className="px-3 py-1.5 rounded hover:bg-slate-100"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/seller/orders"
+                className="px-3 py-1.5 rounded hover:bg-slate-100"
+              >
+                Orders
+              </Link>
+            </>
+          ) : null}
+          {loading ? null : profile ? (
+            <>
+              <span className="px-3 py-1.5 text-slate-500">
+                {profile.display_name ?? "User"}
+                {profile.role !== "buyer" ? (
+                  <span className="ml-1 badge bg-brand-100 text-brand-700">
+                    {profile.role}
+                  </span>
+                ) : null}
+              </span>
+              <button onClick={signOut} className="btn-secondary !py-1.5">
+                Sign out
+              </button>
+            </>
+          ) : (
+            <Link href="/login" className="btn-primary !py-1.5">
+              Sign in
+            </Link>
+          )}
+        </nav>
+      </div>
+    </header>
+  );
+}
