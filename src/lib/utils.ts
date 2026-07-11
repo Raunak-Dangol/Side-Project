@@ -19,6 +19,19 @@ export function truncate(s: string, n: number): string {
   return s.length > n ? `${s.slice(0, n - 1)}…` : s;
 }
 
+/** Up to 2 uppercase initials for avatars (email or display name → letters). */
+export function initials(name: string | null | undefined): string {
+  const s = (name ?? "").trim();
+  if (!s) return "?";
+  // For emails, use the local-part before "@".
+  const local = s.includes("@") ? s.split("@")[0] : s;
+  const parts = local.split(/[\s_.-]+/).filter(Boolean);
+  const letters = parts.length > 1
+    ? parts[0]![0]! + parts[1]![0]!
+    : local.slice(0, 2);
+  return letters.toUpperCase();
+}
+
 /** Relative "time ago" for chat/timestamps. */
 export function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();

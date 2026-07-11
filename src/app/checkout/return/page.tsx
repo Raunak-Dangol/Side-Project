@@ -62,7 +62,7 @@ export default async function CheckoutReturnPage({ searchParams }: PageProps) {
   const { status = "invalid", order: orderId } = await searchParams;
   const copy = STATUS_COPY[status] ?? STATUS_COPY.invalid;
 
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient();
 
   let order: Order | null = null;
   let product: Product | null = null;

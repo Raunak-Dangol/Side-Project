@@ -29,7 +29,7 @@ export async function GET(request: NextRequest) {
         getAll() {
           return request.cookies.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options: Record<string, unknown> }[]) {
           // Mirror the cookies the server client wants to set onto the
           // outgoing redirect response so the session survives the redirect.
           cookiesToSet.forEach(({ name, value, options }) => {

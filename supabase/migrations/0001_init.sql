@@ -79,6 +79,7 @@ create index if not exists chat_messages_stream_id_created_idx
   on public.chat_messages(stream_id, created_at);
 
 -- ─── Enable RLS ───────────────────────────────────────────────────────────────
+-- if you create any new tables later outside of migrations, those won't have RLS enabled by default — you'd need to add alter table ... enable row level security; and the corresponding policies yourself.
 alter table public.profiles       enable row level security;
 alter table public.products       enable row level security;
 alter table public.streams        enable row level security;

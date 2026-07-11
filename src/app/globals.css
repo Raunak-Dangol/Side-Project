@@ -39,3 +39,54 @@ body {
     @apply inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium;
   }
 }
+
+/* ── Stream overlay animations ───────────────────────────────────────────── */
+
+/* Bullet comment: slide/fade in, sit visible, then fade out and unmount.
+   Phases are driven by data-state on the pill (see BulletComments.tsx). */
+@keyframes bullet-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@keyframes bullet-out {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+/* Reaction tap pop: brief scale + dip, back to normal (~400ms). */
+@keyframes reaction-pop {
+  0% {
+    transform: scale(1);
+    opacity: 1;
+  }
+  40% {
+    transform: scale(1.2);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+/* Checkout bottom-sheet: slide up from translateY(100%) to 0 (300ms ease-out).
+   Applied as an enter animation on mount — more reliable than a transform
+   transition on a conditionally-rendered node. */
+@keyframes sheet-slide-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}

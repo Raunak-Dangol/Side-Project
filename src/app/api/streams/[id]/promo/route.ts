@@ -4,21 +4,31 @@ import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Stream } from "@/lib/types";
 
 const Body = z.object({
-  streamId: z.string().uuid(),
-  /** null/undefined clears the pin; a uuid pins that product */
-  productId: z.string().uuid().nullable(),
+  // Empty string → clears (treated as null). Truncate absurdly long values.
+  promo_banner_text: z.string().trim().max(140).optional().nullable(),
+  // Optional link; validated as a URL when present.
+  promo_banner_link: z
+    .string()
+    .trim()
+    .url()
+    .max(500)
+    .optional()
+    .or(z.literal("").transform(() => null))
+    .nullable(),
 });
 
 /**
- * Pins (or unpins) a product on a stream. The caller must own the stream, and
- * (if pinning) the product must belong to the same seller. The actual write
- * goes through the user's session, which RLS gates to streams they own — so
- * even if the ownership check were skipped, RLS would still deny the update.
- *
- * The update propagates to all viewers via Supabase Realtime (streams table is
- * in the supabase_realtime publication).
+ * Sets (or clears) a stream's promo banner text/link. The caller must own the
+ * stream (the write goes through their session, which RLS gates to their own
+ * streams — same shape as /api/pin-product). The update propagates to all
+ * viewers via Supabase Realtime (the streams table is in the publication).
  */
-export async function POST(request: NextRequest) {
+export async function POST(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  const { id: streamId } = await params;
+
   let parsed: z.infer<typeof Body>;
   try {
     parsed = Body.parse(await request.json());
@@ -34,11 +44,11 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  // Fetch the stream to confirm ownership.
+  // Confirm ownership.
   const { data: streamRow, error: sErr } = await supabase
     .from("streams")
     .select("*")
-    .eq("id", parsed.streamId)
+    .eq("id", streamId)
     .single();
   if (sErr || !streamRow) {
     return NextResponse.json({ error: "Stream not found" }, { status: 404 });
@@ -48,25 +58,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  // If pinning a product, confirm it belongs to this seller.
-  if (parsed.productId) {
-    const { data: productRow } = await supabase
-      .from("products")
-      .select("seller_id")
-      .eq("id", parsed.productId)
-      .single();
-    if (!productRow || productRow.seller_id !== user.id) {
-      return NextResponse.json(
-        { error: "Product not found or not yours" },
-        { status: 403 },
-      );
-    }
-  }
+  // Normalize empty strings → null so empty == "no banner".
+  const text = parsed.promo_banner_text?.trim() || null;
+  const link = parsed.promo_banner_link || null;
 
   const { data, error } = await supabase
     .from("streams")
-    .update({ pinned_product_id: parsed.productId })
-    .eq("id", parsed.streamId)
+    .update({ promo_banner_text: text, promo_banner_link: link })
+    .eq("id", streamId)
     .select("*")
     .single();
 

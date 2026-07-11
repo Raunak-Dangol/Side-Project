@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import ProductForm from "@/components/ProductForm";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { formatNpr } from "@/lib/utils";
@@ -114,6 +114,28 @@ export default function SellerDashboard({ profile, products, streams }: Props) {
     );
   }
 
+  // Promo banner text/link for a live stream. Saves via the dedicated route.
+  async function savePromo(stream: Stream, text: string, link: string) {
+    setError(null);
+    const res = await fetch(`/api/streams/${stream.id}/promo`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        promo_banner_text: text,
+        promo_banner_link: link,
+      }),
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}));
+      setError(body.error ?? "Failed to save promo banner");
+      return;
+    }
+    const updated = (await res.json()) as Stream;
+    setStreamList((prev) =>
+      prev.map((s) => (s.id === stream.id ? updated : s)),
+    );
+  }
+
   const liveStream = streamList.find((s) => s.status === "live");
 
   return (
@@ -126,29 +148,6 @@ export default function SellerDashboard({ profile, products, streams }: Props) {
           </p>
         </div>
       </div>
-
-      {profile && profile.role === "buyer" ? (
-        <div className="card p-4 mb-6 bg-amber-50 border-amber-200">
-          <p className="text-sm text-amber-900">
-            You&rsquo;re signed in as a <strong>buyer</strong>. You can create
-            products and streams, but your profile role isn&rsquo;t set to
-            &ldquo;seller&rdquo; yet. RLS still allows you to manage your own
-            data.
-          </p>
-          <button
-            className="btn-primary mt-3"
-            onClick={async () => {
-              await supabase
-                .from("profiles")
-                .update({ role: "seller" })
-                .eq("id", profile.id);
-              window.location.reload();
-            }}
-          >
-            Become a seller
-          </button>
-        </div>
-      ) : null}
 
       {error ? (
         <div className="card p-3 mb-4 bg-rose-50 border-rose-200 text-sm text-rose-700">
@@ -334,6 +333,11 @@ export default function SellerDashboard({ profile, products, streams }: Props) {
                         Changing this updates the pinned card for all viewers in
                         real time.
                       </p>
+
+                      {/* Promo banner — only shown while live. Self-contained
+                          form that initializes from the stream row and saves
+                          via /api/streams/[id]/promo. */}
+                      <PromoEditor stream={s} onSave={savePromo} />
                     </div>
                   ) : null}
                 </div>
@@ -352,5 +356,64 @@ export default function SellerDashboard({ profile, products, streams }: Props) {
         </section>
       </div>
     </div>
+  );
+}
+
+/**
+ * Self-contained promo-banner editor for a live stream. Initializes its inputs
+ * from the stream row and re-syncs if the row changes from elsewhere (e.g. a
+ * realtime update), but otherwise lets the seller type freely and save on
+ * submit. Empty fields clear the banner (server normalizes "" → null).
+ */
+function PromoEditor({
+  stream,
+  onSave,
+}: {
+  stream: Stream;
+  onSave: (stream: Stream, text: string, link: string) => Promise<void>;
+}) {
+  const [text, setText] = useState(stream.promo_banner_text ?? "");
+  const [link, setLink] = useState(stream.promo_banner_link ?? "");
+  const [saving, setSaving] = useState(false);
+
+  // Re-sync when the underlying stream row changes (external update).
+  useEffect(() => {
+    setText(stream.promo_banner_text ?? "");
+    setLink(stream.promo_banner_link ?? "");
+  }, [stream.promo_banner_text, stream.promo_banner_link]);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setSaving(true);
+    await onSave(stream, text, link);
+    setSaving(false);
+  }
+
+  return (
+    <form onSubmit={submit} className="mt-3 space-y-2">
+      <label className="block text-xs font-medium text-slate-600">
+        Promo banner text
+      </label>
+      <input
+        className="input"
+        placeholder="e.g. Free shipping for the next 5 buyers!"
+        value={text}
+        maxLength={140}
+        onChange={(e) => setText(e.target.value)}
+      />
+      <label className="block text-xs font-medium text-slate-600">
+        Promo link (optional — opens in a new tab)
+      </label>
+      <input
+        className="input"
+        type="url"
+        placeholder="https://…"
+        value={link}
+        onChange={(e) => setLink(e.target.value)}
+      />
+      <button type="submit" className="btn-secondary !py-1.5 text-xs" disabled={saving}>
+        {saving ? "Saving…" : "Save promo banner"}
+      </button>
+    </form>
   );
 }

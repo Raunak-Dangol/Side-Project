@@ -22,7 +22,7 @@ const Update = z.object({
  * (seller_id must equal auth.uid()), so we set seller_id from the session.
  */
 async function requireUser() {
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();

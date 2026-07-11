@@ -1,5 +1,5 @@
 import { createServerClient } from "@supabase/ssr";
-import { createClient } from "@supabase/supabase-js";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "@/lib/db-types";
 
@@ -9,8 +9,14 @@ import type { Database } from "@/lib/db-types";
  * and Server Actions for user-scoped queries.
  *
  * In Next 15 `cookies()` is async, so we await it.
+ *
+ * NOTE: The return is cast to `SupabaseClient<Database>` because
+ * `@supabase/ssr@0.5.x` passes its generic parameters to `SupabaseClient` in
+ * an order that is incompatible with `@supabase/supabase-js@2.110+`, causing
+ * the Schema type to resolve to `never`. The cast aligns the generic
+ * resolution with how `createClient<Database>()` resolves it.
  */
-export async function createSupabaseServerClient() {
+export async function createSupabaseServerClient(): Promise<SupabaseClient<Database>> {
   const cookieStore = await cookies();
   return createServerClient<Database>(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -20,7 +26,7 @@ export async function createSupabaseServerClient() {
         getAll() {
           return cookieStore.getAll();
         },
-        setAll(cookiesToSet) {
+        setAll(cookiesToSet: { name: string; value: string; options: Record<string, unknown> }[]) {
           try {
             cookiesToSet.forEach(({ name, value, options }) =>
               cookieStore.set(name, value, options),
@@ -32,7 +38,7 @@ export async function createSupabaseServerClient() {
         },
       },
     },
-  );
+  ) as unknown as SupabaseClient<Database>;
 }
 
 /**

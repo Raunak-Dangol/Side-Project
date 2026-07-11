@@ -61,7 +61,7 @@ export default function PinnedProduct({
         .select("*")
         .eq("id", pinnedId)
         .single();
-      setProduct((data as Product) ?? null);
+      setProduct((data as Product | null) ?? null);
     })();
   }, [pinnedId, product?.id, supabase]);
 

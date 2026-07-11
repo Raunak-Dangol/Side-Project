@@ -64,7 +64,7 @@ export function buildEsewaFormPayload(args: {
   transactionUuid: string;
 }): EsewaPaymentFieldPayload & { signature: string } {
   const product_code = ESEWA_PRODUCT_CODE();
-  const fieldValues: Record<string, string> = {
+  const fieldValues: EsewaPaymentFieldPayload = {
     amount: args.amount,
     tax_amount: args.taxAmount,
     total_amount: args.totalAmount,
@@ -73,7 +73,7 @@ export function buildEsewaFormPayload(args: {
   };
   // eSewa signs exactly these fields, in this order:
   const signedFields = ["total_amount", "transaction_uuid", "product_code"];
-  const signedString = buildSignedString(signedFields, fieldValues);
+  const signedString = buildSignedString(signedFields, fieldValues as unknown as Record<string, string>);
   return { ...fieldValues, signature: sign(signedString) };
 }
 

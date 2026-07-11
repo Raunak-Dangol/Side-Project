@@ -22,14 +22,21 @@ export default function Navbar() {
           .select("*")
           .eq("id", user.id)
           .single();
-        if (mounted) setProfile((data as Profile) ?? null);
+        if (mounted) setProfile((data as Profile | null) ?? null);
       }
       if (mounted) setLoading(false);
     })();
 
-    const { data: sub } = supabase.auth.onAuthStateChange(() => {
-      // reload profile on sign-in/out
-      window.location.reload();
+    let isInitialized = false;
+    let lastUserId: string | undefined = undefined;
+
+    const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
+      const currentUserId = session?.user?.id;
+      if (isInitialized && lastUserId !== currentUserId) {
+        window.location.reload();
+      }
+      lastUserId = currentUserId;
+      isInitialized = true;
     });
     return () => {
       mounted = false;
@@ -53,7 +60,7 @@ export default function Navbar() {
           <Link href="/" className="px-3 py-1.5 rounded hover:bg-slate-100">
             Streams
           </Link>
-          {profile?.role === "seller" || profile?.role === "admin" ? (
+          {profile?.seller_status === "approved" ? (
             <>
               <Link
                 href="/seller/dashboard"
@@ -71,11 +78,20 @@ export default function Navbar() {
           ) : null}
           {loading ? null : profile ? (
             <>
+              {/* TODO (post-prototype): fold this into a proper profile menu. */}
+              {profile.seller_status !== "approved" ? (
+                <Link
+                  href="/seller/apply"
+                  className="px-3 py-1.5 rounded hover:bg-slate-100 text-brand-700"
+                >
+                  Become a seller
+                </Link>
+              ) : null}
               <span className="px-3 py-1.5 text-slate-500">
                 {profile.display_name ?? "User"}
-                {profile.role !== "buyer" ? (
+                {profile.role === "admin" ? (
                   <span className="ml-1 badge bg-brand-100 text-brand-700">
-                    {profile.role}
+                    admin
                   </span>
                 ) : null}
               </span>

@@ -18,12 +18,27 @@ interface OrderRow {
 }
 
 export default async function SellerOrdersPage() {
-  const supabase = createSupabaseServerClient();
+  const supabase = await createSupabaseServerClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   if (!user) redirect("/login?redirect=/seller/orders");
+
+  // Seller capability is gated server-side on seller_status (single source of
+  // truth). Non-approved users are sent to the application page rather than the
+  // orders table.
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("seller_status")
+    .eq("id", user.id)
+    .single();
+  const sellerStatus = (
+    profileRow as { seller_status: string } | null
+  )?.seller_status;
+  if (sellerStatus !== "approved") {
+    redirect("/seller/apply");
+  }
 
   // RLS lets the seller read orders on their own products (via the join).
   // We fetch orders whose product belongs to this seller.
@@ -32,7 +47,7 @@ export default async function SellerOrdersPage() {
     .select("id")
     .eq("seller_id", user.id);
 
-  const productIds = (products ?? []).map((p) => p.id);
+  const productIds = (products ?? []).map((p: { id: string }) => p.id);
   if (productIds.length === 0) {
     return (
       <>

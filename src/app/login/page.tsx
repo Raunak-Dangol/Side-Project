@@ -108,13 +108,12 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-slate-400 mt-4">
-          Want to sell? Sign in, then set your role to &ldquo;seller&rdquo; from
-          the{" "}
+          Want to sell? Sign in, then{" "}
           <button
             className="underline"
-            onClick={() => router.push("/seller/dashboard")}
+            onClick={() => router.push("/seller/apply")}
           >
-            dashboard
+            apply to become a seller
           </button>
           .
         </p>

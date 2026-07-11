@@ -14,7 +14,10 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body>
+      {/* suppressHydrationWarning: browser extensions (e.g. ColorZilla's
+          `cz-shortcut-listen`) inject attributes onto <body> before React
+          hydrates, which Next flags as a mismatch. This is not our markup. */}
+      <body suppressHydrationWarning>
         <div className="min-h-screen flex flex-col">
           <main className="flex-1">{children}</main>
         </div>
