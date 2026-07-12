@@ -112,7 +112,7 @@ export default function ChatPanel({ streamId }: { streamId: string }) {
         ) : null}
         {messages.map((m) => (
           <div key={m.id} className="leading-snug">
-            <span className="font-medium text-brand-700">
+            <span className="font-medium text-primary-dark">
               {m.profiles?.display_name ?? "Someone"}
             </span>{" "}
             <span className="text-slate-400 text-[10px]">{timeAgo(m.created_at)}</span>

@@ -97,7 +97,7 @@ export default function PinnedProduct({
               </span>
             </div>
             <h3 className="font-medium truncate mt-1">{product.name}</h3>
-            <p className="text-brand-700 font-semibold">
+            <p className="inline-block rounded bg-gold-50 px-1.5 py-0.5 font-semibold text-gold-dark">
               {formatNpr(product.price_cents)}
             </p>
           </div>

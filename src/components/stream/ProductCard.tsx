@@ -43,7 +43,7 @@ export default function ProductCard({ product, onBuy }: ProductCardProps) {
           <p className="truncate text-[11px] font-medium leading-tight text-slate-900">
             {product.name}
           </p>
-          <p className="text-[11px] font-semibold text-brand-700">
+          <p className="mt-0.5 inline-block rounded bg-gold-50 px-1 text-[11px] font-semibold text-gold-dark">
             {formatNpr(product.price_cents)}
           </p>
         </div>
@@ -52,7 +52,7 @@ export default function ProductCard({ product, onBuy }: ProductCardProps) {
         type="button"
         onClick={onBuy}
         disabled={soldOut}
-        className="m-1.5 mt-1 rounded bg-brand-600 px-2 py-1 text-[11px] font-medium text-white transition hover:bg-brand-700 disabled:cursor-not-allowed disabled:opacity-50"
+        className="m-1.5 mt-1 rounded bg-primary px-2 py-1 text-[11px] font-medium text-primary-50 transition hover:bg-primary-dark disabled:cursor-not-allowed disabled:opacity-50"
       >
         {soldOut ? "Sold out" : "Buy"}
       </button>

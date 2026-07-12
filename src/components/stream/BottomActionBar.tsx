@@ -69,7 +69,7 @@ export default function BottomActionBar({
           type="button"
           aria-label="Send gift"
           onClick={onSendGift}
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/40 text-base text-white backdrop-blur-sm transition hover:bg-black/60 active:scale-90"
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/40 text-base text-gold backdrop-blur-sm transition hover:bg-black/60 active:scale-90"
         >
           🎁
         </button>

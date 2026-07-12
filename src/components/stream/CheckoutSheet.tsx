@@ -85,10 +85,10 @@ export default function CheckoutSheet({
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-slate-200" />
         <div className="flex items-start justify-between">
           <div>
-            <h2 className="font-semibold text-lg text-slate-900">
+            <h2 className="font-semibold text-lg text-ink">
               {product.name}
             </h2>
-            <p className="font-semibold text-brand-700">
+            <p className="mt-0.5 inline-block rounded bg-gold-50 px-1.5 py-0.5 font-semibold text-gold-dark">
               {formatNpr(product.price_cents)}
             </p>
           </div>

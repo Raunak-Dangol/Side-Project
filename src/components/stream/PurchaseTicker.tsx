@@ -47,7 +47,7 @@ export default function PurchaseTicker({ streamId }: PurchaseTickerProps) {
 
   return (
     <div className="pointer-events-none absolute bottom-[210px] left-[12px] z-10">
-      <span className="inline-flex items-center gap-1 rounded-full bg-black/40 px-2.5 py-1 text-[11px] font-medium text-white backdrop-blur-sm">
+      <span className="inline-flex items-center gap-1 rounded-full bg-primary/85 px-2.5 py-1 text-[11px] font-medium text-primary-50 backdrop-blur-sm">
         🛒 {count} just added to cart
       </span>
     </div>

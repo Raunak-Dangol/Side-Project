@@ -110,7 +110,7 @@ function ReactionButton({
         type="button"
         aria-label={`Send ${label}`}
         onClick={onClick}
-        className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-lg text-white backdrop-blur-sm transition hover:bg-black/55 active:scale-90"
+        className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-lg text-gold backdrop-blur-sm transition hover:bg-black/55 active:scale-90"
       >
         {/* popKey changes on every tap → key change remounts the span → the
             reaction-pop keyframe replays from its start. */}

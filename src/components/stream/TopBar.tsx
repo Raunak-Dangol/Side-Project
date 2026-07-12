@@ -35,7 +35,7 @@ export default function TopBar({
     <div className="absolute left-[12px] right-[12px] top-[12px] z-10 flex items-center gap-2">
       {/* Seller identity */}
       <div className="flex items-center gap-2 rounded-full bg-black/40 py-1 pl-1 pr-3 backdrop-blur-sm">
-        <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-brand-600 text-xs font-semibold text-white">
+        <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary text-xs font-semibold text-primary-50">
           {seller?.display_name ? (
             initials(seller.display_name)
           ) : (
@@ -51,7 +51,7 @@ export default function TopBar({
               <span
                 title="Verified seller"
                 aria-label="Verified seller"
-                className="text-[11px] text-sky-300"
+                className="inline-flex items-center rounded-full border border-gold bg-black/30 px-1 text-[9px] font-medium text-gold-light"
               >
                 ✓
               </span>

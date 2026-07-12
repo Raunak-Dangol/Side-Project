@@ -63,7 +63,7 @@ export default function BuyModal({
         <div className="flex items-start justify-between">
           <div>
             <h2 className="font-semibold text-lg">{product.name}</h2>
-            <p className="text-brand-700 font-semibold">
+            <p className="mt-0.5 inline-block rounded bg-gold-50 px-1.5 py-0.5 font-semibold text-gold-dark">
               {formatNpr(product.price_cents)}
             </p>
           </div>

@@ -213,7 +213,7 @@ export default function SellerDashboard({ profile, products, streams }: Props) {
                     </p>
                   </div>
                   <button
-                    className="text-xs text-brand-700 hover:underline"
+                    className="text-xs text-primary-dark hover:underline"
                     onClick={() => {
                       setEditing(p);
                       setShowProductForm(true);

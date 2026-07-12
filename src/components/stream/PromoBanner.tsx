@@ -39,9 +39,9 @@ export default function PromoBanner({ text, link }: PromoBannerProps) {
             : undefined
         }
         className={[
-          "flex items-center justify-center gap-1.5 rounded-md bg-fuchsia-600/85 px-3 py-1.5 text-center text-[11px] font-medium text-white backdrop-blur-sm",
+          "flex items-center justify-center gap-1.5 rounded-md bg-gold-dark/90 px-3 py-1.5 text-center text-[11px] font-medium text-ivory backdrop-blur-sm",
           interactive
-            ? "cursor-pointer transition hover:bg-fuchsia-600"
+            ? "cursor-pointer transition hover:bg-gold-dark"
             : "",
         ].join(" ")}
       >

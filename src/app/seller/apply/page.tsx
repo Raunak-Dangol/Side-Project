@@ -82,11 +82,11 @@ export default async function SellerApplyPage() {
         </p>
 
         {profile?.seller_status === "pending" ? (
-          <div className="card p-6 bg-amber-50 border-amber-200">
-            <h2 className="font-semibold text-amber-900 mb-1">
+          <div className="card p-6 bg-primary-50 border-primary-light/40">
+            <h2 className="font-semibold text-primary-dark mb-1">
               Your application is under review
             </h2>
-            <p className="text-sm text-amber-800">
+            <p className="text-sm text-primary">
               We received your application
               {detail.businessName ? ` for “${detail.businessName}”` : ""}
               {detail.submittedAt
