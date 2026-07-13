@@ -5,7 +5,7 @@ import { getAuthenticatedUser } from "@/lib/auth";
 import { khaltiInitiate } from "@/lib/payments/khalti";
 import { buildEsewaFormPayload, ESEWA_FORM_URL } from "@/lib/payments/esewa";
 import { uuid } from "@/lib/utils";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 import type { Product, Stream } from "@/lib/types";
 
 const Body = z.object({
@@ -63,6 +63,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Stream not found" }, { status: 404 });
   }
 
+  // Fetch buyer display name (Khalti requires customer_info.name).
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("display_name")
+    .eq("id", user.id)
+    .single();
+
   // Amount is taken from the DB (never from the client). eSewa requires integer
   // rupees for some fields; both gateways use paisa for the actual amount.
   const amount = product.price_cents;
@@ -94,6 +101,7 @@ export async function POST(request: NextRequest) {
         purchaseOrderName: product.name,
         returnUrl: `${APP_URL()}/api/checkout/khalti/callback`,
         buyerEmail: user.email,
+        buyerName: profile?.display_name ?? user.email?.split("@")[0],
       });
       return NextResponse.json({ paymentUrl: initiated.payment_url });
     }

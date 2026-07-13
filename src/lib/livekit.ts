@@ -1,5 +1,5 @@
 import { AccessToken } from "livekit-server-sdk";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 
 /**
  * Server-side LiveKit access token generation. NEVER call this from client code

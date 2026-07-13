@@ -8,9 +8,19 @@
  * All calls use `Authorization: Key <secret>`. The secret is server-side only.
  */
 
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 
-const KHALTI_BASE = () => serverEnv.khaltiBaseUrl;
+/**
+ * Khalti ePayment API origin. The code below appends `/api/v2/...` itself, so
+ * this MUST be the bare origin (e.g. `https://dev.khalti.com` or
+ * `https://khalti.com`). We defensively strip any accidental trailing
+ * `/api/v2/` so a misconfigured `KHALTI_BASE_URL` doesn't produce a doubled
+ * `/api/v2/api/v2/...` URL (which returns a Khalti 404 page).
+ */
+const KHALTI_BASE = (): string => {
+  const raw = (serverEnv.khaltiBaseUrl ?? "").trim().replace(/\/+$/, "");
+  return raw.replace(/\/api\/v2$/i, "");
+};
 const KHALTI_SECRET = () => serverEnv.khaltiSecretKey;
 
 /** Builds the `Authorization: Key <secret>` header used by all Khalti calls. */
@@ -41,7 +51,7 @@ export interface KhaltiInitiateResponse {
 export async function khaltiInitiate(
   params: KhaltiInitiateParams,
 ): Promise<KhaltiInitiateResponse> {
-  const res = await fetch(`${KHALTI_BASE()}/api/v2/epay/initiate/`, {
+  const res = await fetch(`${KHALTI_BASE()}/api/v2/epayment/initiate/`, {
     method: "POST",
     headers: authHeader(),
     body: JSON.stringify({
@@ -50,8 +60,14 @@ export async function khaltiInitiate(
       amount: params.amount,
       purchase_order_id: params.purchaseOrderId,
       purchase_order_name: params.purchaseOrderName,
-      ...(params.buyerName ? { customer_info: { name: params.buyerName } } : {}),
-      ...(params.buyerEmail ? { customer_info: { email: params.buyerEmail } } : {}),
+      ...(params.buyerName || params.buyerEmail)
+        ? {
+            customer_info: {
+              ...(params.buyerName ? { name: params.buyerName } : {}),
+              ...(params.buyerEmail ? { email: params.buyerEmail } : {}),
+            },
+          }
+        : {},
     }),
   });
 
@@ -89,7 +105,7 @@ export interface KhaltiLookupResponse {
 export async function khaltiLookup(
   pidx: string,
 ): Promise<KhaltiLookupResponse> {
-  const res = await fetch(`${KHALTI_BASE()}/api/v2/epay/transactions/lookup/`, {
+  const res = await fetch(`${KHALTI_BASE()}/api/v2/epayment/lookup/`, {
     method: "POST",
     headers: authHeader(),
     body: JSON.stringify({ pidx }),

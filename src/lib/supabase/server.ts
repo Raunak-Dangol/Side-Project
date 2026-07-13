@@ -2,7 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "@/lib/db-types";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 
 /**
  * Server-side Supabase client that uses the ANON key and the user's session

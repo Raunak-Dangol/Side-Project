@@ -6,7 +6,7 @@ import {
   esewaGetStatus,
   ESEWA_PRODUCT_CODE,
 } from "@/lib/payments/esewa";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 import type { Order } from "@/lib/types";
 
 const APP_URL = () => serverEnv.appUrl;

@@ -1,4 +1,4 @@
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 
 /**
  * Sliding-window rate limiter.

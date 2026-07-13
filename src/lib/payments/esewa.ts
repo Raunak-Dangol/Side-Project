@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { serverEnv } from "@/lib/env";
+import { serverEnv } from "@/lib/env/server";
 
 /**
  * eSewa ePay v2 — server-side helpers.
