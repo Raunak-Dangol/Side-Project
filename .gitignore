@@ -28,6 +28,11 @@ yarn-error.log*
 .env.local.example
 .env.local
 
+# local secret/key files that must never be committed
+tencentkey.txt
+*.key
+*.secret
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

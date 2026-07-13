@@ -6,9 +6,10 @@ import {
   esewaGetStatus,
   ESEWA_PRODUCT_CODE,
 } from "@/lib/payments/esewa";
+import { serverEnv } from "@/lib/env";
 import type { Order } from "@/lib/types";
 
-const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const APP_URL = () => serverEnv.appUrl;
 
 /**
  * eSewa redirect callback. Lands here with a base64 `data` param.
@@ -111,7 +112,10 @@ export async function GET(request: NextRequest) {
     p_product_id: order.product_id,
   });
   if (!decremented) {
-    await service.from("orders").update({ status: "failed" }).eq("id", order.id);
+    await service
+      .from("orders")
+      .update({ status: "failed", needs_refund: true })
+      .eq("id", order.id);
     console.error(`[esewa] oversold order=${order.id} — needs manual refund`);
     return NextResponse.redirect(
       `${APP_URL()}/checkout/return?status=oversold&order=${order.id}`,

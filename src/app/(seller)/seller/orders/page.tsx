@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { revalidatePath } from "next/cache";
+import { createSupabaseServerClient, createSupabaseServiceClient } from "@/lib/supabase/server";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { formatNpr, timeAgo } from "@/lib/utils";
 
 export const dynamic = "force-dynamic";
@@ -18,9 +20,7 @@ interface OrderRow {
 
 export default async function SellerOrdersPage() {
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser(supabase);
 
   if (!user) redirect("/login?redirect=/seller/orders");
 
@@ -62,12 +62,68 @@ export default async function SellerOrdersPage() {
 
   const rows = (orders as OrderRow[] | null) ?? [];
 
+  // Orders that were paid but oversold (money taken, no stock): need a refund.
+  const { data: refundRows } = await supabase
+    .from("orders")
+    .select(
+      "id, amount_cents, payment_gateway, gateway_transaction_id, product:product_id(name), buyer:buyer_id(display_name)",
+    )
+    .in("product_id", productIds)
+    .eq("needs_refund", true)
+    .is("refund_status", null)
+    .order("created_at", { ascending: false })
+    .limit(100);
+
+  const needsRefund = (refundRows as OrderRow[] | null) ?? [];
+
   return (
     <div className="mx-auto max-w-5xl px-4 py-8">
       <h1 className="text-2xl font-semibold mb-1">Orders</h1>
       <p className="text-sm text-slate-500 mb-6">
         Orders placed on your products during streams.
       </p>
+
+      {needsRefund.length > 0 ? (
+        <section className="mb-8 card border-rose-200 bg-rose-50 p-4">
+          <h2 className="text-sm font-semibold text-rose-700 mb-1">
+            Needs refund ({needsRefund.length})
+          </h2>
+          <p className="text-xs text-rose-600 mb-3">
+            These payments succeeded but the item was already sold out. The buyer
+            was told to request a refund — process it and mark it resolved here.
+          </p>
+          <ul className="divide-y divide-rose-100">
+            {needsRefund.map((o) => (
+              <li
+                key={o.id}
+                className="flex items-center justify-between gap-3 py-2"
+              >
+                <div className="min-w-0 text-sm">
+                  <div className="font-medium text-slate-800">
+                    {o.product?.name ?? "—"}{" "}
+                    <span className="text-slate-500">
+                      ({formatNpr(o.amount_cents)})
+                    </span>
+                  </div>
+                  <div className="text-xs text-slate-500">
+                    {o.buyer?.display_name ?? "—"} · {o.payment_gateway} ·{" "}
+                    <span className="font-mono">{o.id}</span>
+                  </div>
+                </div>
+                <form action={markRefunded}>
+                  <input type="hidden" name="orderId" value={o.id} />
+                  <button
+                    type="submit"
+                    className="rounded-md bg-rose-600 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-rose-700"
+                  >
+                    Mark refunded
+                  </button>
+                </form>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       {rows.length === 0 ? (
         <EmptyOrders />
@@ -110,9 +166,48 @@ export default async function SellerOrdersPage() {
         </div>
       )}
 
-      {/* TODO (post-prototype): fulfillment workflow, export to CSV, refunds UI */}
+      {/* TODO (post-prototype): fulfillment workflow, export to CSV. Refunds UI
+          is now handled above via the "Needs refund" queue. */}
     </div>
   );
+}
+
+/**
+ * Server action: marks an oversold order as refunded. Trusted server-only code —
+ * it verifies the order's product belongs to the calling seller before updating,
+ * and uses the service-role client (no client RLS update policy exists by
+ * design).
+ */
+async function markRefunded(formData: FormData) {
+  "use server";
+
+  const orderId = String(formData.get("orderId") ?? "");
+  if (!orderId) return;
+
+  const supabase = await createSupabaseServerClient();
+  const user = await getAuthenticatedUser(supabase);
+  if (!user) return;
+
+  const service = createSupabaseServiceClient();
+
+  // Verify ownership: the order's product must belong to this seller.
+  const { data: orderRow } = await service
+    .from("orders")
+    .select("id, product:product_id(seller_id)")
+    .eq("id", orderId)
+    .single();
+  const product = (orderRow as { product: { seller_id: string } } | null)
+    ?.product;
+  if (!product || product.seller_id !== user.id) {
+    return; // not this seller's order — ignore
+  }
+
+  await service
+    .from("orders")
+    .update({ needs_refund: false, refund_status: "refunded" })
+    .eq("id", orderId);
+
+  revalidatePath("/seller/orders");
 }
 
 function StatusBadge({ status }: { status: string }) {

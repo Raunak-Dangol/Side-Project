@@ -145,6 +145,8 @@ export interface Database {
           gateway_transaction_id: string | null;
           status: "pending" | "paid" | "failed";
           amount_cents: number;
+          needs_refund: boolean;
+          refund_status: string | null;
           created_at: string;
         };
         Insert: {
@@ -156,11 +158,15 @@ export interface Database {
           gateway_transaction_id?: string | null;
           status?: "pending" | "paid" | "failed";
           amount_cents: number;
+          needs_refund?: boolean;
+          refund_status?: string | null;
         };
         Update: {
           gateway_transaction_id?: string | null;
           status?: "pending" | "paid" | "failed";
           amount_cents?: number;
+          needs_refund?: boolean;
+          refund_status?: string | null;
         };
         Relationships: [];
       };

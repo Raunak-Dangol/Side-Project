@@ -8,10 +8,13 @@
  * All calls use `Authorization: Key <secret>`. The secret is server-side only.
  */
 
-const KHALTI_BASE = () => process.env.KHALTI_BASE_URL ?? "https://dev.khalti.com";
-const KHALTI_SECRET = () => process.env.KHALTI_SECRET_KEY;
+import { serverEnv } from "@/lib/env";
 
-function authHeader() {
+const KHALTI_BASE = () => serverEnv.khaltiBaseUrl;
+const KHALTI_SECRET = () => serverEnv.khaltiSecretKey;
+
+/** Builds the `Authorization: Key <secret>` header used by all Khalti calls. */
+export function authHeader() {
   const key = KHALTI_SECRET();
   if (!key) throw new Error("Missing KHALTI_SECRET_KEY");
   return { Authorization: `Key ${key}`, "Content-Type": "application/json" };
@@ -43,7 +46,7 @@ export async function khaltiInitiate(
     headers: authHeader(),
     body: JSON.stringify({
       return_url: params.returnUrl,
-      website_url: process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000",
+      website_url: serverEnv.appUrl,
       amount: params.amount,
       purchase_order_id: params.purchaseOrderId,
       purchase_order_name: params.purchaseOrderName,

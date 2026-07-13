@@ -74,6 +74,10 @@ export interface Order {
   gateway_transaction_id: string | null;
   status: OrderStatus;
   amount_cents: number;
+  /** Set when payment succeeded but stock was gone (money taken, no item). */
+  needs_refund: boolean;
+  /** Tracks manual refund handling: null | "refunded" | "reviewed". */
+  refund_status: string | null;
   created_at: string;
 }
 

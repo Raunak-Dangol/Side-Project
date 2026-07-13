@@ -1,4 +1,5 @@
 import { AccessToken } from "livekit-server-sdk";
+import { serverEnv } from "@/lib/env";
 
 /**
  * Server-side LiveKit access token generation. NEVER call this from client code
@@ -12,12 +13,8 @@ export async function generateLiveKitToken(params: {
   participantName?: string;
   canPublish: boolean;
 }): Promise<string> {
-  const apiKey = process.env.LIVEKIT_API_KEY;
-  const apiSecret = process.env.LIVEKIT_API_SECRET;
-
-  if (!apiKey || !apiSecret) {
-    throw new Error("Missing LIVEKIT_API_KEY / LIVEKIT_API_SECRET");
-  }
+  const apiKey = serverEnv.livekitApiKey;
+  const apiSecret = serverEnv.livekitApiSecret;
 
   const at = new AccessToken(apiKey, apiSecret, {
     identity: params.participantIdentity,

@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { serverEnv } from "@/lib/env";
 
 /**
  * eSewa ePay v2 — server-side helpers.
@@ -17,14 +18,10 @@ import crypto from "node:crypto";
  * The HMAC secret key is server-side only. `product_code` is public.
  */
 
-const ESEWA_SECRET = () => process.env.ESEWA_SECRET_KEY;
-export const ESEWA_PRODUCT_CODE = () =>
-  process.env.ESEWA_PRODUCT_CODE ?? "EPAYTEST";
-export const ESEWA_FORM_URL = () =>
-  process.env.ESEWA_FORM_URL ?? "https://rc-epay.esewa.com.np/api/epay/main/v2/form";
-export const ESEWA_STATUS_URL = () =>
-  process.env.ESEWA_STATUS_URL ??
-  "https://rc-epay.esewa.com.np/api/epay/transaction/status/";
+const ESEWA_SECRET = () => serverEnv.esewaSecretKey;
+export const ESEWA_PRODUCT_CODE = () => serverEnv.esewaProductCode;
+export const ESEWA_FORM_URL = () => serverEnv.esewaFormUrl;
+export const ESEWA_STATUS_URL = () => serverEnv.esewaStatusUrl;
 
 /**
  * The canonical string eSewa signs/verifies. Fields MUST be in the exact order

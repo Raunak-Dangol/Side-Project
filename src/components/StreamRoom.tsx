@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import VideoStage from "@/components/VideoStage";
+import { publicEnv } from "@/lib/env";
 import type { Stream } from "@/lib/types";
 
 interface StreamRoomProps {
@@ -88,7 +89,7 @@ export default function StreamRoom({
     <div className="h-full">
       <VideoStage
         token={token}
-        serverUrl={process.env.NEXT_PUBLIC_LIVEKIT_URL}
+        serverUrl={publicEnv.livekitUrl}
         role={role}
         roomName={stream.livekit_room_name}
       />

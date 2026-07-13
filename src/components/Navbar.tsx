@@ -3,12 +3,14 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { initials } from "@/lib/utils";
 import type { Profile } from "@/lib/types";
 
 export default function Navbar() {
   const supabase = createSupabaseBrowserClient();
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -83,8 +85,7 @@ export default function Navbar() {
             </>
           ) : null}
           {loading ? null : profile ? (
-            <>
-              {/* TODO (post-prototype): fold this into a proper profile menu. */}
+            <div className="flex items-center gap-1">
               {profile.seller_status !== "approved" ? (
                 <Link
                   href="/seller/apply"
@@ -93,21 +94,68 @@ export default function Navbar() {
                   Become a seller
                 </Link>
               ) : null}
-              <span className="px-3 py-1.5 text-primary-50">
-                {profile.display_name ?? "User"}
-                {profile.role === "admin" ? (
-                  <span className="ml-1 badge bg-gold/20 text-gold-light">
-                    admin
+
+              <div className="relative">
+                <button
+                  onClick={() => setMenuOpen((v) => !v)}
+                  className="flex items-center gap-2 rounded-full px-2 py-1 text-primary-50 hover:bg-primary-dark"
+                  aria-haspopup="menu"
+                  aria-expanded={menuOpen}
+                >
+                  <span className="inline-flex h-7 w-7 items-center justify-center rounded-full bg-gold/20 text-xs font-semibold text-gold-light">
+                    {initials(profile.display_name ?? "U")}
                   </span>
+                  <span className="max-w-[8rem] truncate">
+                    {profile.display_name ?? "User"}
+                  </span>
+                  {profile.role === "admin" ? (
+                    <span className="badge bg-gold/20 text-gold-light">
+                      admin
+                    </span>
+                  ) : null}
+                </button>
+
+                {menuOpen ? (
+                  <>
+                    <div
+                      className="fixed inset-0 z-10"
+                      onClick={() => setMenuOpen(false)}
+                      aria-hidden="true"
+                    />
+                    <div
+                      role="menu"
+                      className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
+                    >
+                      <Link
+                        href="/orders"
+                        role="menuitem"
+                        onClick={() => setMenuOpen(false)}
+                        className="block px-4 py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        My orders
+                      </Link>
+                      {profile.seller_status !== "approved" ? (
+                        <Link
+                          href="/seller/apply"
+                          role="menuitem"
+                          onClick={() => setMenuOpen(false)}
+                          className="block px-4 py-2 text-slate-700 hover:bg-slate-50"
+                        >
+                          Become a seller
+                        </Link>
+                      ) : null}
+                      <button
+                        onClick={signOut}
+                        role="menuitem"
+                        className="block w-full px-4 py-2 text-left text-rose-600 hover:bg-slate-50"
+                      >
+                        Sign out
+                      </button>
+                    </div>
+                  </>
                 ) : null}
-              </span>
-              <button
-                onClick={signOut}
-                className="rounded-md border border-primary-50/30 px-3 py-1.5 text-primary-50 transition hover:bg-primary-dark"
-              >
-                Sign out
-              </button>
-            </>
+              </div>
+            </div>
           ) : (
             <Link
               href="/login"

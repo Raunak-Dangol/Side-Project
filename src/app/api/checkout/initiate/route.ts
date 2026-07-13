@@ -1,9 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient, createSupabaseServiceClient } from "@/lib/supabase/server";
+import { getAuthenticatedUser } from "@/lib/auth";
 import { khaltiInitiate } from "@/lib/payments/khalti";
 import { buildEsewaFormPayload, ESEWA_FORM_URL } from "@/lib/payments/esewa";
 import { uuid } from "@/lib/utils";
+import { serverEnv } from "@/lib/env";
 import type { Product, Stream } from "@/lib/types";
 
 const Body = z.object({
@@ -12,7 +14,7 @@ const Body = z.object({
   gateway: z.enum(["khalti", "esewa"]),
 });
 
-const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const APP_URL = () => serverEnv.appUrl;
 
 /**
  * Initiates a checkout. Creates a `pending` order row with a fresh
@@ -32,9 +34,7 @@ export async function POST(request: NextRequest) {
   }
 
   const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getAuthenticatedUser(supabase);
   if (!user) {
     return NextResponse.json({ error: "Sign in to buy" }, { status: 401 });
   }

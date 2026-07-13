@@ -2,6 +2,7 @@ import { createServerClient } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { cookies } from "next/headers";
 import type { Database } from "@/lib/db-types";
+import { serverEnv } from "@/lib/env";
 
 /**
  * Server-side Supabase client that uses the ANON key and the user's session
@@ -19,8 +20,8 @@ import type { Database } from "@/lib/db-types";
 export async function createSupabaseServerClient(): Promise<SupabaseClient<Database>> {
   const cookieStore = await cookies();
   return createServerClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    serverEnv.supabaseUrl,
+    serverEnv.supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -48,8 +49,8 @@ export async function createSupabaseServerClient(): Promise<SupabaseClient<Datab
  */
 export function createSupabaseServiceClient() {
   return createClient<Database>(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    serverEnv.supabaseUrl,
+    serverEnv.supabaseServiceRoleKey,
     { auth: { persistSession: false } },
   );
 }

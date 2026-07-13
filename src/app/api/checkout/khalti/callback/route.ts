@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { khaltiLookup } from "@/lib/payments/khalti";
+import { serverEnv } from "@/lib/env";
 import type { Order } from "@/lib/types";
 
 const Query = z.object({
@@ -11,7 +12,7 @@ const Query = z.object({
   purchase_order_id: z.string().min(1),
 });
 
-const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
+const APP_URL = () => serverEnv.appUrl;
 
 /**
  * Khalti redirect callback. The buyer lands here with query params after
@@ -111,6 +112,7 @@ export async function GET(request: NextRequest) {
       .from("orders")
       .update({
         status: "failed",
+        needs_refund: true,
         gateway_transaction_id: lookup.transaction_id ?? parsed.purchase_order_id,
       })
       .eq("id", order.id);
