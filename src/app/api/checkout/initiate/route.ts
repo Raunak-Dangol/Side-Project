@@ -1,8 +1,8 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient, createSupabaseServiceClient } from "@/lib/supabase/server";
-import { khaltiInitiate } from "@/lib/khalti";
-import { buildEsewaFormPayload, ESEWA_FORM_URL } from "@/lib/esewa";
+import { khaltiInitiate } from "@/lib/payments/khalti";
+import { buildEsewaFormPayload, ESEWA_FORM_URL } from "@/lib/payments/esewa";
 import { uuid } from "@/lib/utils";
 import type { Product, Stream } from "@/lib/types";
 

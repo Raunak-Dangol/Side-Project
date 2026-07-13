@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Navbar from "@/components/Navbar";
 import SellerApplyForm from "@/components/SellerApplyForm";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 
@@ -72,52 +71,49 @@ export default async function SellerApplyPage() {
   }
 
   return (
-    <>
-      <Navbar />
-      <div className="mx-auto max-w-lg px-4 py-8">
-        <h1 className="text-2xl font-semibold mb-1">Become a seller</h1>
-        <p className="text-sm text-slate-500 mb-6">
-          Submit a short application. Once approved, you can create products and
-          go live — your normal account stays exactly the same.
-        </p>
+    <div className="mx-auto max-w-lg px-4 py-8">
+      <h1 className="text-2xl font-semibold mb-1">Become a seller</h1>
+      <p className="text-sm text-slate-500 mb-6">
+        Submit a short application. Once approved, you can create products and
+        go live — your normal account stays exactly the same.
+      </p>
 
-        {profile?.seller_status === "pending" ? (
-          <div className="card p-6 bg-primary-50 border-primary-light/40">
-            <h2 className="font-semibold text-primary-dark mb-1">
-              Your application is under review
+      {profile?.seller_status === "pending" ? (
+        <div className="card p-6 bg-primary-50 border-primary-light/40">
+          <h2 className="font-semibold text-primary-dark mb-1">
+            Your application is under review
+          </h2>
+          <p className="text-sm text-primary">
+            We received your application
+            {detail.businessName ? ` for “${detail.businessName}”` : ""}
+            {detail.submittedAt
+              ? ` on ${new Date(detail.submittedAt).toLocaleString()}`
+              : ""}
+            . You&apos;ll gain access to the seller dashboard once it&apos;s
+            approved.
+          </p>
+        </div>
+      ) : profile?.seller_status === "rejected" ? (
+        <div className="space-y-4">
+          <div className="card p-6 bg-rose-50 border-rose-200">
+            <h2 className="font-semibold text-rose-900 mb-1">
+              Your last application wasn&apos;t approved
             </h2>
-            <p className="text-sm text-primary">
-              We received your application
-              {detail.businessName ? ` for “${detail.businessName}”` : ""}
-              {detail.submittedAt
-                ? ` on ${new Date(detail.submittedAt).toLocaleString()}`
-                : ""}
-              . You&apos;ll gain access to the seller dashboard once it&apos;s
-              approved.
+            <p className="text-sm text-rose-800">
+              {rejectedNote
+                ? `Reviewer note: ${rejectedNote}`
+                : "No additional detail was provided."}
+            </p>
+            <p className="text-sm text-rose-800 mt-2">
+              You can submit a new application below.
             </p>
           </div>
-        ) : profile?.seller_status === "rejected" ? (
-          <div className="space-y-4">
-            <div className="card p-6 bg-rose-50 border-rose-200">
-              <h2 className="font-semibold text-rose-900 mb-1">
-                Your last application wasn&apos;t approved
-              </h2>
-              <p className="text-sm text-rose-800">
-                {rejectedNote
-                  ? `Reviewer note: ${rejectedNote}`
-                  : "No additional detail was provided."}
-              </p>
-              <p className="text-sm text-rose-800 mt-2">
-                You can submit a new application below.
-              </p>
-            </div>
-            <SellerApplyForm userId={user.id} />
-          </div>
-        ) : (
-          // 'none' or profile missing → fresh application form.
           <SellerApplyForm userId={user.id} />
-        )}
-      </div>
-    </>
+        </div>
+      ) : (
+        // 'none' or profile missing → fresh application form.
+        <SellerApplyForm userId={user.id} />
+      )}
+    </div>
   );
 }

@@ -1,5 +1,4 @@
 import { redirect } from "next/navigation";
-import Navbar from "@/components/Navbar";
 import SellerDashboard from "@/components/SellerDashboard";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { Product, Profile, Stream } from "@/lib/types";
@@ -37,13 +36,10 @@ export default async function SellerDashboardPage() {
     .order("created_at", { ascending: false });
 
   return (
-    <>
-      <Navbar />
-      <SellerDashboard
-        profile={profile}
-        products={(products as Product[] | null) ?? []}
-        streams={(streams as Stream[] | null) ?? []}
-      />
-    </>
+    <SellerDashboard
+      profile={profile}
+      products={(products as Product[] | null) ?? []}
+      streams={(streams as Stream[] | null) ?? []}
+    />
   );
 }

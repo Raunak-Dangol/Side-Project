@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Navbar from "@/components/Navbar";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatNpr } from "@/lib/utils";
 import type { Order, Product, Stream } from "@/lib/types";
@@ -100,61 +99,58 @@ export default async function CheckoutReturnPage({ searchParams }: PageProps) {
   }[copy.tone];
 
   return (
-    <>
-      <Navbar />
-      <div className="mx-auto max-w-md px-4 py-12">
-        <div className={`card border p-6 ${tone}`}>
-          <h1 className="text-xl font-semibold mb-1">{copy.title}</h1>
-          <p className="text-sm opacity-90">{copy.body}</p>
-        </div>
-
-        {order && product ? (
-          <div className="card p-4 mt-4 text-sm">
-            <h2 className="font-medium mb-2">Order details</h2>
-            <dl className="space-y-1 text-slate-600">
-              <div className="flex justify-between">
-                <dt>Product</dt>
-                <dd className="font-medium text-slate-900">{product.name}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Amount</dt>
-                <dd className="font-medium text-slate-900">
-                  {formatNpr(order.amount_cents)}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Gateway</dt>
-                <dd className="font-medium text-slate-900 capitalize">
-                  {order.payment_gateway}
-                </dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Status</dt>
-                <dd className="font-medium text-slate-900">{order.status}</dd>
-              </div>
-              <div className="flex justify-between">
-                <dt>Reference</dt>
-                <dd className="font-mono text-xs text-slate-500">
-                  {order.gateway_transaction_id ?? "—"}
-                </dd>
-              </div>
-            </dl>
-          </div>
-        ) : null}
-
-        <div className="mt-6 flex gap-2">
-          {stream ? (
-            <Link href={`/stream/${stream.id}`} className="btn-secondary">
-              Back to stream
-            </Link>
-          ) : null}
-          <Link href="/" className="btn-primary">
-            Browse streams
-          </Link>
-        </div>
-
-        {/* TODO (post-prototype): email receipt + order history page for buyers */}
+    <div className="mx-auto max-w-md px-4 py-12">
+      <div className={`card border p-6 ${tone}`}>
+        <h1 className="text-xl font-semibold mb-1">{copy.title}</h1>
+        <p className="text-sm opacity-90">{copy.body}</p>
       </div>
-    </>
+
+      {order && product ? (
+        <div className="card p-4 mt-4 text-sm">
+          <h2 className="font-medium mb-2">Order details</h2>
+          <dl className="space-y-1 text-slate-600">
+            <div className="flex justify-between">
+              <dt>Product</dt>
+              <dd className="font-medium text-slate-900">{product.name}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Amount</dt>
+              <dd className="font-medium text-slate-900">
+                {formatNpr(order.amount_cents)}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Gateway</dt>
+              <dd className="font-medium text-slate-900 capitalize">
+                {order.payment_gateway}
+              </dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Status</dt>
+              <dd className="font-medium text-slate-900">{order.status}</dd>
+            </div>
+            <div className="flex justify-between">
+              <dt>Reference</dt>
+              <dd className="font-mono text-xs text-slate-500">
+                {order.gateway_transaction_id ?? "—"}
+              </dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+
+      <div className="mt-6 flex gap-2">
+        {stream ? (
+          <Link href={`/stream/${stream.id}`} className="btn-secondary">
+            Back to stream
+          </Link>
+        ) : null}
+        <Link href="/" className="btn-primary">
+          Browse streams
+        </Link>
+      </div>
+
+      {/* TODO (post-prototype): email receipt + order history page for buyers */}
+    </div>
   );
 }

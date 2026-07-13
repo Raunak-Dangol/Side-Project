@@ -1,7 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
-import { khaltiLookup } from "@/lib/khalti";
+import { khaltiLookup } from "@/lib/payments/khalti";
 import type { Order } from "@/lib/types";
 
 const Query = z.object({

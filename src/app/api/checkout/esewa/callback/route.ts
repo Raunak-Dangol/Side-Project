@@ -5,7 +5,7 @@ import {
   verifyEsewaSignature,
   esewaGetStatus,
   ESEWA_PRODUCT_CODE,
-} from "@/lib/esewa";
+} from "@/lib/payments/esewa";
 import type { Order } from "@/lib/types";
 
 const APP_URL = () => process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000";
