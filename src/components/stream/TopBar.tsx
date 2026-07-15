@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import type { Profile } from "@/lib/types";
+import type { StreamFeedSeller } from "@/lib/types";
 import { initials } from "@/lib/utils";
 
 export interface PresenceViewer {
@@ -10,7 +10,7 @@ export interface PresenceViewer {
 }
 
 interface TopBarProps {
-  seller: Profile | null;
+  seller: StreamFeedSeller | null;
   /** Whether the seller's account is marked verified (SQL-only flag). */
   verified: boolean;
   viewerCount: number;

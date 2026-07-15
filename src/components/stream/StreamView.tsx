@@ -14,15 +14,22 @@ import BottomActionBar from "@/components/stream/BottomActionBar";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import { escapeForRender } from "@/lib/sanitize";
 import { timeAgo } from "@/lib/utils";
-import type { Profile, Product, Stream, ChatMessageWithUser } from "@/lib/types";
+import type { StreamFeedSeller, Product, Stream, ChatMessageWithUser } from "@/lib/types";
 
 interface StreamViewProps {
   stream: Stream;
-  seller: Profile | null;
+  seller: StreamFeedSeller | null;
   initialPinnedProduct: Product | null;
   role: "seller" | "viewer";
   viewerId: string | null;
   viewerName?: string;
+  /**
+   * When false (feed context), every resource-allocating effect bails out and
+   * cleans up: no LiveKit connection, no Supabase Realtime channels, no
+   * presence, no polling/timers. Defaults to true so the `/stream/[id]` detail
+   * page is unaffected.
+   */
+  active?: boolean;
 }
 
 /**
@@ -44,8 +51,12 @@ export default function StreamView({
   role,
   viewerId,
   viewerName,
+  active,
 }: StreamViewProps) {
   const supabase = createSupabaseBrowserClient();
+  const isActive = active ?? true;
+  // Feed mode: fill the parent slide. Detail page (active undefined): phone frame.
+  const inFeed = active !== undefined;
 
   // ── Presence: single source of truth for viewer count + recent-joiner stack ──
   // One channel for the whole stream; every client tracks itself and reacts to
@@ -67,6 +78,7 @@ export default function StreamView({
   );
 
   useEffect(() => {
+    if (!isActive) return; // feed: no realtime channels for inactive streams
     let channel: ReturnType<typeof supabase.channel> | null = null;
     // Same StrictMode race guard as the presence effect above.
     let cancelled = false;
@@ -111,7 +123,7 @@ export default function StreamView({
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase, stream.id]);
+  }, [supabase, stream.id, isActive]);
 
   // Keep the full chat log scrolled to the latest while open.
   useEffect(() => {
@@ -141,6 +153,7 @@ export default function StreamView({
   );
 
   useEffect(() => {
+    if (!isActive) return; // feed: no realtime channels for inactive streams
     const channel = supabase
       .channel(`stream-pinned:${stream.id}`)
       .on(
@@ -162,7 +175,7 @@ export default function StreamView({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [supabase, stream.id]);
+  }, [supabase, stream.id, isActive]);
 
   // When the pinned id changes, fetch the product details.
   useEffect(() => {
@@ -194,6 +207,7 @@ export default function StreamView({
   }>({ heart: 0, gift: 0 });
 
   useEffect(() => {
+    if (!isActive) return; // feed: no realtime channels for inactive streams
     let channel: ReturnType<typeof supabase.channel> | null = null;
     // Same StrictMode race guard as the presence effect above.
     let cancelled = false;
@@ -243,7 +257,7 @@ export default function StreamView({
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase, stream.id]);
+  }, [supabase, stream.id, isActive]);
 
   // Gift sent from the BottomActionBar gift icon — a discrete single reaction
   // posted immediately (no batching, unlike the rapid-tap rail).
@@ -260,6 +274,7 @@ export default function StreamView({
   }, [stream.id]);
 
   useEffect(() => {
+    if (!isActive) return; // feed: never track presence for inactive streams
     // Stable identity per tab. Authenticated viewers use their user id; anon
     // viewers get a synthetic id so they still count toward the total.
     const myId = viewerId ?? `anon-${Math.random().toString(36).slice(2, 10)}`;
@@ -337,10 +352,26 @@ export default function StreamView({
       cancelled = true;
       if (channel) supabase.removeChannel(channel);
     };
-  }, [supabase, stream.id, viewerId, viewerName]);
+  }, [supabase, stream.id, viewerId, viewerName, isActive]);
+
+  // ── Reset ephemeral state when the stream deactivates so stale bullet ──
+  // comments, reactions, and viewer counts never bleed into a re-activation.
+  useEffect(() => {
+    if (isActive) return;
+    setMessages([]);
+    setReactionTotals({ heart: 0, gift: 0 });
+    setViewerCount(0);
+    setRecentViewers([]);
+  }, [isActive]);
 
   return (
-    <div className="relative mx-auto h-[100dvh] w-full overflow-hidden bg-black md:h-[760px] md:max-w-[420px]">
+    <div
+      className={
+        inFeed
+          ? "relative h-full w-full overflow-hidden bg-black"
+          : "relative mx-auto h-[100dvh] w-full overflow-hidden bg-black md:h-[760px] md:max-w-[420px]"
+      }
+    >
       {/* ── Base layer: the LiveKit video/participant view (z-0) ── */}
       <div className="absolute inset-0 z-0">
         <StreamRoom
@@ -348,6 +379,7 @@ export default function StreamView({
           role={role}
           viewerId={viewerId}
           viewerName={viewerName}
+          active={isActive}
         />
       </div>
 

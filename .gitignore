@@ -36,5 +36,5 @@ tencentkey.txt
 # typescript
 *.tsbuildinfo
 next-env.d.ts
-
+.zcode
 .doc 

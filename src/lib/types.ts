@@ -95,6 +95,22 @@ export interface StreamWithRelations extends Stream {
   pinned_product?: Product | null;
 }
 
+/**
+ * Minimal seller shape rendered by the vertical feed — only the fields the
+ * feed UI actually reads. Kept deliberately narrow so the query stays explicit
+ * (do not widen the shared `StreamWithRelations.seller` relation).
+ */
+export type StreamFeedSeller = Pick<
+  Profile,
+  "id" | "display_name" | "is_verified"
+>;
+
+/** A stream as loaded by the feed page: full Stream + feed seller + pinned product. */
+export type StreamFeedItem = Stream & {
+  seller: StreamFeedSeller | null;
+  pinned_product: Product | null;
+};
+
 export interface ChatMessageWithUser extends ChatMessage {
   profiles?: Pick<Profile, "id" | "display_name"> | null;
 }

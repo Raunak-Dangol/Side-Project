@@ -10,6 +10,12 @@ interface StreamRoomProps {
   role: "seller" | "viewer";
   viewerId: string | null;
   viewerName?: string;
+  /**
+   * When false (feed context), no token is fetched and no video is mounted —
+   * the room is fully disconnected. Defaults to true so the `/stream/[id]`
+   * detail page keeps its immediate-connect behavior.
+   */
+  active?: boolean;
 }
 
 interface TokenResponse {
@@ -23,23 +29,38 @@ interface TokenResponse {
  * A viewer who isn't signed in still sees the video but can't chat/buy (the
  * chat panel and buy button guard that separately). For the prototype we still
  * issue a viewer token to anonymous visitors so they can watch.
+ *
+ * Activation: when `active` is false we never request a token and show a static
+ * "connecting" placeholder instead of mounting LiveKit. The token fetch is
+ * abortible so rapid scrolling can't let a stale response reconnect a stream
+ * after it has deactivated.
  */
 export default function StreamRoom({
   stream,
   role,
   viewerId,
   viewerName,
+  active,
 }: StreamRoomProps) {
+  const isActive = active ?? true;
   const [token, setToken] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    let cancelled = false;
+    if (!isActive) {
+      // Deactivated: drop any token we had so VideoStage unmounts.
+      setToken(null);
+      setError(null);
+      return;
+    }
+
+    const controller = new AbortController();
     (async () => {
       try {
         const res = await fetch("/api/livekit-token", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: controller.signal,
           body: JSON.stringify({
             streamId: stream.id,
             role,
@@ -58,17 +79,18 @@ export default function StreamRoom({
           throw new Error(body.error ?? "Failed to get stream token");
         }
         const data = (await res.json()) as TokenResponse;
-        if (!cancelled) setToken(data.token);
+        setToken(data.token);
       } catch (e) {
-        if (!cancelled) {
-          setError(e instanceof Error ? e.message : "Stream error");
-        }
+        if (controller.signal.aborted) return; // expected on deactivate/scroll
+        setError(e instanceof Error ? e.message : "Stream error");
       }
     })();
+
     return () => {
-      cancelled = true;
+      controller.abort();
+      setToken(null);
     };
-  }, [stream.id, role, viewerId, viewerName]);
+  }, [isActive, stream.id, role, viewerId, viewerName]);
 
   if (error) {
     return (
@@ -77,7 +99,7 @@ export default function StreamRoom({
       </div>
     );
   }
-  if (!token) {
+  if (!isActive || !token) {
     return (
       <div className="h-full flex items-center justify-center text-white/60 text-sm">
         Connecting to stream…
@@ -92,6 +114,7 @@ export default function StreamRoom({
         serverUrl={publicEnv.livekitUrl}
         role={role}
         roomName={stream.livekit_room_name}
+        active={isActive}
       />
     </div>
   );

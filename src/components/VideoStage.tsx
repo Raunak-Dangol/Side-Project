@@ -17,6 +17,12 @@ interface VideoStageProps {
   /** Sellers publish audio+video; viewers only subscribe. */
   role: "seller" | "viewer";
   roomName: string;
+  /**
+   * Drives the LiveKit `connect` prop. Defaults to true so the detail page
+   * connects immediately. StreamRoom already conditionally mounts VideoStage
+   * only when active+token; this is a second defensive layer.
+   */
+  active?: boolean;
 }
 
 /**
@@ -53,12 +59,13 @@ export default function VideoStage({
   serverUrl,
   role,
   roomName,
+  active,
 }: VideoStageProps) {
   return (
     <LiveKitRoom
       token={token}
       serverUrl={serverUrl}
-      connect={true}
+      connect={active ?? true}
       video={role === "seller"}
       audio={role === "seller"}
       options={{
