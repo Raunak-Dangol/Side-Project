@@ -389,6 +389,7 @@ export default function StreamView({
         verified={Boolean(seller?.is_verified)}
         viewerCount={viewerCount}
         recentViewers={recentViewers}
+        viewerId={viewerId}
       />
 
       {/* ── RankBadge (step 8): hourly rank pill, fed by presence count ── */}

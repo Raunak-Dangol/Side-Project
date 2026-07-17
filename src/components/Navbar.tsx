@@ -127,6 +127,14 @@ export default function Navbar() {
                       className="absolute right-0 z-20 mt-2 w-48 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-sm shadow-lg"
                     >
                       <Link
+                        href={`/u/${profile.id}`}
+                        role="menuitem"
+                        onClick={() => setMenuOpen(false)}
+                        className="block px-4 py-2 text-slate-700 hover:bg-slate-50"
+                      >
+                        Profile
+                      </Link>
+                      <Link
                         href="/orders"
                         role="menuitem"
                         onClick={() => setMenuOpen(false)}

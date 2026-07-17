@@ -78,6 +78,8 @@ export interface Order {
   needs_refund: boolean;
   /** Tracks manual refund handling: null | "refunded" | "reviewed". */
   refund_status: string | null;
+  /** Khalti-issued pidx, bound to the order at initiation to block replay. */
+  khalti_pidx: string | null;
   created_at: string;
 }
 
@@ -87,6 +89,41 @@ export interface ChatMessage {
   user_id: string;
   message: string;
   created_at: string;
+}
+
+/**
+ * One follow edge: `follower_id` follows `followee_id`. Public (select policy
+ * is `using (true)`); only the follower may create/delete their own edges.
+ */
+export interface Follow {
+  follower_id: string;
+  followee_id: string;
+  created_at: string;
+}
+
+/**
+ * A user's profile as rendered on /u/[id], plus the follow-graph data the page
+ * needs: follower/following counts and whether the current viewer is following.
+ * `is_following` is resolved server-side so the FollowButton renders correctly
+ * on first paint (no flash).
+ */
+export interface UserProfile {
+  id: string;
+  display_name: string | null;
+  role: UserRole;
+  is_verified: boolean;
+  seller_status: SellerStatus;
+  follower_count: number;
+  following_count: number;
+  /** Whether the current viewer follows this user. False for anon / own profile. */
+  is_following: boolean;
+}
+
+/** Minimal user shape for a row in the followers/following lists. */
+export interface FollowListUser {
+  id: string;
+  display_name: string | null;
+  is_verified: boolean;
 }
 
 /** Stream joined with its seller + currently pinned product (for list/detail). */

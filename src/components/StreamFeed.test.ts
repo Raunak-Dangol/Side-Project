@@ -10,7 +10,8 @@ import { describe, it, expect } from "vitest";
  *   3. Highest visible intersection ratio wins.
  *   4. Ratios below 0.6 do NOT switch the active slide.
  *   5. Hidden document deactivates the feed.
- *   6. Role derives "seller" only for the seller's own stream.
+ *   6. The feed is a discovery surface — EVERYONE watches as a viewer, even the
+ *      stream's owner (no auto-publish from the feed).
  */
 
 // Simulate the IntersectionObserver callback logic from StreamFeed.
@@ -76,24 +77,25 @@ describe("StreamFeed active-index logic", () => {
 });
 
 describe("StreamFeed role derivation", () => {
-  it('returns "seller" when viewerId matches the stream seller', () => {
+  // The feed is a discovery surface: everyone is a viewer here, regardless of
+  // ownership. A seller who scrolls onto their own stream must NOT auto-publish
+  // their camera/mic inside a browse slide (privacy hazard, audit finding M5).
+  // Sellers publish from the dashboard or /stream/[id], not from the feed.
+  it("always returns viewer for the stream owner", () => {
     const stream = { seller_id: "user-1" } as any;
-    const role =
-      "user-1" && stream.seller_id === "user-1" ? "seller" : "viewer";
-    expect(role).toBe("seller");
-  });
-
-  it('returns "viewer" for other streams', () => {
-    const stream = { seller_id: "user-2" } as any;
-    const role =
-      "user-1" && stream.seller_id === "user-1" ? "seller" : "viewer";
+    const role = stream.seller_id === "user-1" ? "viewer" : "viewer";
     expect(role).toBe("viewer");
   });
 
-  it('returns "viewer" when viewerId is null (anon)', () => {
+  it("always returns viewer for other streams", () => {
     const stream = { seller_id: "user-2" } as any;
-    const role =
-      null && stream.seller_id === "user-1" ? "seller" : "viewer";
+    const role = stream.seller_id === "user-1" ? "viewer" : "viewer";
+    expect(role).toBe("viewer");
+  });
+
+  it("always returns viewer when viewerId is null (anon)", () => {
+    const stream = { seller_id: "user-2" } as any;
+    const role = null === "user-1" ? "viewer" : "viewer";
     expect(role).toBe("viewer");
   });
 });

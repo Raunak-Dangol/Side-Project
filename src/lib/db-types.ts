@@ -147,6 +147,7 @@ export interface Database {
           amount_cents: number;
           needs_refund: boolean;
           refund_status: string | null;
+          khalti_pidx: string | null;
           created_at: string;
         };
         Insert: {
@@ -160,6 +161,7 @@ export interface Database {
           amount_cents: number;
           needs_refund?: boolean;
           refund_status?: string | null;
+          khalti_pidx?: string | null;
         };
         Update: {
           gateway_transaction_id?: string | null;
@@ -167,6 +169,7 @@ export interface Database {
           amount_cents?: number;
           needs_refund?: boolean;
           refund_status?: string | null;
+          khalti_pidx?: string | null;
         };
         Relationships: [];
       };
@@ -251,6 +254,35 @@ export interface Database {
           },
         ];
       };
+      follows: {
+        Row: {
+          follower_id: string;
+          followee_id: string;
+          created_at: string;
+        };
+        Insert: {
+          follower_id: string;
+          followee_id: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "follows_follower_id_fkey";
+            columns: ["follower_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "follows_followee_id_fkey";
+            columns: ["followee_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
     };
     Views: {
       [_ in never]: never;
@@ -271,6 +303,14 @@ export interface Database {
           image_url: string | null;
           created_at: string;
         };
+      };
+      fulfill_order: {
+        Args: {
+          p_order: string;
+          p_transaction_id?: string | null;
+          p_khalti_pidx?: string | null;
+        };
+        Returns: string;
       };
       set_pinned_product: {
         Args: { p_stream: string; p_product: string };

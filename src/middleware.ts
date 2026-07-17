@@ -3,9 +3,16 @@ import { NextResponse, type NextRequest } from "next/server";
 import { publicEnv } from "@/lib/env";
 
 /**
- * Refreshes the Supabase session on every request and guards protected routes.
- * - /seller/* requires an authenticated user (role check happens in pages).
- * - Unauthenticated users hitting protected routes are redirected to /login.
+ * Guards protected routes. Only runs on `/seller/*` so public pages (`/`,
+ * `/browse`, `/stream/[id]`, ...) skip the `getUser()` network round-trip
+ * entirely — this is the single biggest win for navigation speed. Pages that
+ * need auth (`/orders`, `/checkout/return`) enforce it themselves via RLS or an
+ * in-page `getUser()` check, not via this redirect.
+ *
+ * Token refresh: because middleware no longer runs on every request, a logged-in
+ * user's session is refreshed lazily — when they next hit `/seller/*` or any
+ * page that calls `getUser()`. Acceptable for a prototype whose browsing is
+ * mostly anonymous.
  */
 export async function middleware(request: NextRequest) {
   const response = NextResponse.next({ request });
@@ -51,5 +58,6 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|api).*)"],
+  // ONLY match /seller/* — public pages no longer pay the getUser() round-trip.
+  matcher: ["/seller/:path*"],
 };

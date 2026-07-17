@@ -2,7 +2,10 @@ import StreamCard from "@/components/StreamCard";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import type { StreamWithRelations } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+// Browse is a listing — revalidate instead of fully dynamic so repeat visits and
+// the back button are instant. 15s keeps it fresh without re-running the query
+// on every navigation.
+export const revalidate = 15;
 
 export default async function BrowsePage() {
   const supabase = await createSupabaseServerClient();

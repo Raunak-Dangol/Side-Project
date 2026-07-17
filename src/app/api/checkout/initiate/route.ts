@@ -77,21 +77,26 @@ export async function POST(request: NextRequest) {
 
   // Insert a PENDING order via the service role (bypasses RLS).
   const service = createSupabaseServiceClient();
-  const { error: insertError } = await service.from("orders").insert({
-    buyer_id: user.id,
-    product_id: product.id,
-    stream_id: stream.id,
-    payment_gateway: parsed.gateway,
-    gateway_transaction_id: transactionUuid,
-    status: "pending",
-    amount_cents: amount,
-  });
-  if (insertError) {
+  const { data: insertedRow, error: insertError } = await service
+    .from("orders")
+    .insert({
+      buyer_id: user.id,
+      product_id: product.id,
+      stream_id: stream.id,
+      payment_gateway: parsed.gateway,
+      gateway_transaction_id: transactionUuid,
+      status: "pending",
+      amount_cents: amount,
+    })
+    .select("id")
+    .single();
+  if (insertError || !insertedRow) {
     return NextResponse.json(
       { error: "Could not create order" },
       { status: 500 },
     );
   }
+  const orderId = insertedRow.id;
 
   try {
     if (parsed.gateway === "khalti") {
@@ -103,6 +108,15 @@ export async function POST(request: NextRequest) {
         buyerEmail: user.email,
         buyerName: profile?.display_name ?? user.email?.split("@")[0],
       });
+      // Bind the pidx Khalti issued to this order NOW, so the callback can prove
+      // the returned payment belongs to this order (blocks pidx replay against a
+      // different order — audit finding H1). Storing it before the redirect also
+      // makes a duplicate/retried callback findable even if Khalti's own
+      // transaction_id differs from our transaction_uuid.
+      await service
+        .from("orders")
+        .update({ khalti_pidx: initiated.pidx })
+        .eq("id", orderId);
       return NextResponse.json({ paymentUrl: initiated.payment_url });
     }
 

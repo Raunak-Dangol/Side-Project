@@ -1,8 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import type { StreamFeedSeller } from "@/lib/types";
 import { initials } from "@/lib/utils";
+import FollowButton from "@/components/FollowButton";
 
 export interface PresenceViewer {
   id: string;
@@ -16,6 +18,10 @@ interface TopBarProps {
   viewerCount: number;
   /** Last few distinct viewers who joined (most-recent first), max ~3. */
   recentViewers: PresenceViewer[];
+  /** Viewer id, used to decide whether to show the Follow button. */
+  viewerId?: string | null;
+  /** Whether the viewer already follows this seller (optimistic seed). */
+  initiallyFollowing?: boolean;
 }
 
 /**
@@ -28,6 +34,8 @@ export default function TopBar({
   verified,
   viewerCount,
   recentViewers,
+  viewerId,
+  initiallyFollowing,
 }: TopBarProps) {
   const router = useRouter();
 
@@ -35,18 +43,37 @@ export default function TopBar({
     <div className="absolute left-[12px] right-[12px] top-[12px] z-10 flex items-center gap-2">
       {/* Seller identity */}
       <div className="flex items-center gap-2 rounded-full bg-black/40 py-1 pl-1 pr-3 backdrop-blur-sm">
-        <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary text-xs font-semibold text-primary-50">
-          {seller?.display_name ? (
-            initials(seller.display_name)
-          ) : (
+        {seller ? (
+          <Link
+            href={`/u/${seller.id}`}
+            className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary text-xs font-semibold text-primary-50"
+            aria-label="View seller profile"
+          >
+            {seller.display_name ? (
+              initials(seller.display_name)
+            ) : (
+              <span aria-hidden>?</span>
+            )}
+          </Link>
+        ) : (
+          <div className="flex h-8 w-8 items-center justify-center overflow-hidden rounded-full bg-primary text-xs font-semibold text-primary-50">
             <span aria-hidden>?</span>
-          )}
-        </div>
+          </div>
+        )}
         <div className="flex flex-col leading-tight">
           <div className="flex items-center gap-1">
-            <span className="max-w-[120px] truncate text-xs font-medium text-white">
-              {seller?.display_name ?? "Unknown seller"}
-            </span>
+            {seller ? (
+              <Link
+                href={`/u/${seller.id}`}
+                className="max-w-[120px] truncate text-xs font-medium text-white hover:underline"
+              >
+                {seller.display_name ?? "Unknown seller"}
+              </Link>
+            ) : (
+              <span className="max-w-[120px] truncate text-xs font-medium text-white">
+                Unknown seller
+              </span>
+            )}
             {verified ? (
               <span
                 title="Verified seller"
@@ -62,6 +89,15 @@ export default function TopBar({
           </span>
         </div>
       </div>
+
+      {/* Follow button (only when a viewer is watching someone else's stream) */}
+      {seller && viewerId && viewerId !== seller.id ? (
+        <FollowButton
+          targetId={seller.id}
+          initiallyFollowing={Boolean(initiallyFollowing)}
+          className="!mt-0"
+        />
+      ) : null}
 
       {/* Avatar stack of recent joiners */}
       {recentViewers.length > 0 ? (

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServerClient, createSupabaseServiceClient } from "@/lib/supabase/server";
+import { rateLimit, getClientId } from "@/lib/rate-limit";
 
 const Body = z.object({
   kind: z.enum(["heart", "gift"]),
@@ -16,6 +17,11 @@ const Body = z.object({
  * `reactions` table has no INSERT/UPDATE RLS policy, so only this server route
  * (service role) can mutate it. This is the one funnel through which all taps
  * flow, which is where rate-limiting / caps belong.
+ *
+ * Rate-limited per user (30/min) and per IP (60/min) — without this a script
+ * could loop the endpoint and add millions of fake reactions (audit finding
+ * H5), since the service-role RPC bypasses RLS. The per-user limit is the
+ * binding constraint.
  *
  * The updated total is broadcast to every viewer via Supabase Realtime (the
  * `reactions` table is in the supabase_realtime publication).
@@ -39,6 +45,24 @@ export async function POST(
   } = await supabase.auth.getUser();
   if (!user) {
     return NextResponse.json({ error: "Sign in to react" }, { status: 401 });
+  }
+
+  // Rate limit: 30 reactions/min per user (binding), 60/min per IP. A burst of
+  // taps is normal; 30 batches/min (each up to 50 taps) = 1500/min, far above
+  // any human cadence.
+  const ipLimit = await rateLimit({
+    key: `react:ip:${getClientId(request)}`,
+    limit: 60,
+  });
+  if (!ipLimit.ok) {
+    return NextResponse.json({ error: "Too many reactions. Slow down." }, { status: 429 });
+  }
+  const userLimit = await rateLimit({
+    key: `react:user:${user.id}`,
+    limit: 30,
+  });
+  if (!userLimit.ok) {
+    return NextResponse.json({ error: "You're reacting too fast." }, { status: 429 });
   }
 
   // Confirm the stream exists (avoid incrementing a dangling row).

@@ -1,10 +1,12 @@
 import Link from "next/link";
 import StreamFeed from "@/components/StreamFeed";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getAuthenticatedUser } from "@/lib/auth";
 import type { StreamFeedItem } from "@/lib/types";
 
-export const dynamic = "force-dynamic";
+// Revalidate frequently instead of forcing fully dynamic rendering. Live streams
+// change infrequently (a seller going live), so a 10s cache makes repeat
+// navigations / back-button near-instant while keeping the feed fresh enough.
+export const revalidate = 10;
 
 /**
  * Root home (`/`) — full-screen, live-only vertical feed (TikTok-style).
@@ -18,10 +20,26 @@ export const dynamic = "force-dynamic";
  */
 export default async function FeedPage() {
   const supabase = await createSupabaseServerClient();
-  const user = await getAuthenticatedUser(supabase);
 
-  // Load the viewer's display name only when authenticated. The feed passes it
-  // to StreamView for the presence avatar stack + chat attribution.
+  // Run auth + the streams query IN PARALLEL. The viewer display_name lookup
+  // depends on the user id, so it's a second step — but it runs concurrently
+  // with the streams fetch, not sequentially. This cuts the home page from
+  // 3-4 serial round-trips down to 2 stages.
+  const [authResult, streamsResult] = await Promise.all([
+    supabase.auth.getUser(),
+    supabase
+      .from("streams")
+      .select(
+        "*, seller:seller_id(id, display_name, is_verified), pinned_product:pinned_product_id(*)",
+      )
+      .eq("status", "live")
+      .order("created_at", { ascending: false }),
+  ]);
+  const user = authResult.data.user ?? null;
+  const streams = (streamsResult.data as StreamFeedItem[] | null) ?? [];
+
+  // Viewer display name only when authenticated. Runs only after we know the
+  // id, but is a single round-trip (and skipped for anon).
   let viewerName: string | null = null;
   if (user) {
     const { data: profile } = await supabase
@@ -31,16 +49,6 @@ export default async function FeedPage() {
       .single();
     viewerName = profile?.display_name ?? null;
   }
-
-  const { data } = await supabase
-    .from("streams")
-    .select(
-      "*, seller:seller_id(id, display_name, is_verified), pinned_product:pinned_product_id(*)",
-    )
-    .eq("status", "live")
-    .order("created_at", { ascending: false });
-
-  const streams = (data as StreamFeedItem[] | null) ?? [];
 
   if (streams.length === 0) {
     return (

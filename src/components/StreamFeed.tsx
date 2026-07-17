@@ -33,7 +33,13 @@ export default function StreamFeed({
 }: StreamFeedProps) {
   const router = useRouter();
   const [activeIndex, setActiveIndex] = useState(0);
-  const [documentVisible, setDocumentVisible] = useState(true);
+  // Lazy-init from the ACTUAL visibility state so a feed mounted in a background
+  // tab (middle-click, session restore, prerender) does NOT connect a full
+  // StreamView — LiveKit + Realtime + presence — in a tab nobody is looking at.
+  // The visibilitychange listener below keeps it in sync after mount.
+  const [documentVisible, setDocumentVisible] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible",
+  );
 
   // Stable ref collection for each slide, keyed by index. A ref array (rather
   // than a map) is simplest because slide order never changes during the feed's
@@ -100,11 +106,14 @@ export default function StreamFeed({
 
   const goBrowse = useCallback(() => router.push("/browse"), [router]);
 
-  // Per-stream role: a user is "seller" only on their OWN stream.
+  // The feed is a DISCOVERY surface: everyone watches as a viewer here, even the
+  // stream's owner. Auto-publishing a seller's camera/mic just because they
+  // scrolled onto their own stream would be a surprise privacy hazard in a
+  // TikTok-style slide (audit finding M5). Sellers go live with publish rights
+  // from their dashboard or the /stream/[id] page — not from the feed.
   const roleFor = useCallback(
-    (stream: StreamFeedItem): "seller" | "viewer" =>
-      viewerId && stream.seller_id === viewerId ? "seller" : "viewer",
-    [viewerId],
+    (_stream: StreamFeedItem): "seller" | "viewer" => "viewer",
+    [],
   );
 
   return (

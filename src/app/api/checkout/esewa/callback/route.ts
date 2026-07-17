@@ -107,29 +107,28 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── Confirmed: atomic stock decrement. ──
-  const { data: decremented } = await service.rpc("decrement_stock", {
-    p_product_id: order.product_id,
+  // ── Confirmed: atomic fulfillment (H2 fix). ──
+  // fulfill_order locks the order row, checks status (idempotent), and
+  // decrements stock inside the same transaction — so concurrent/duplicate
+  // callbacks cannot double-decrement or double-transition.
+  const { data: result } = await service.rpc("fulfill_order", {
+    p_order: order.id,
+    p_transaction_id: status.transaction_code ?? payload.transaction_uuid,
   });
-  if (!decremented) {
-    await service
-      .from("orders")
-      .update({ status: "failed", needs_refund: true })
-      .eq("id", order.id);
+  const outcome = (result as string | null) ?? "not_found";
+
+  if (outcome === "oversold") {
     console.error(`[esewa] oversold order=${order.id} — needs manual refund`);
     return NextResponse.redirect(
       `${APP_URL()}/checkout/return?status=oversold&order=${order.id}`,
     );
   }
+  if (outcome === "not_found") {
+    return NextResponse.redirect(`${APP_URL()}/checkout/return?status=not_found`);
+  }
 
-  await service
-    .from("orders")
-    .update({
-      status: "paid",
-      gateway_transaction_id: status.transaction_code ?? payload.transaction_uuid,
-    })
-    .eq("id", order.id);
-
+  // 'paid' (this callback) or 'already_handled' (a prior callback already paid
+  // it) — either way the buyer sees a success page.
   return NextResponse.redirect(
     `${APP_URL()}/checkout/return?status=paid&order=${order.id}`,
   );

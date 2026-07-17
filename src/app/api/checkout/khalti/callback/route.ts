@@ -66,6 +66,21 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // ── H1: bind the pidx to this order and verify the payment is for THIS order.
+  // The lookup is authoritative — we trust its `purchase_order_id` (Khalti
+  // echoes back the value we sent at initiation). If it doesn't match, this is a
+  // replay of an old pidx against a different order → reject. We also persist
+  // the pidx via fulfill_order so the unique index blocks a later replay.
+  if (lookup.purchase_order_id && lookup.purchase_order_id !== order.gateway_transaction_id) {
+    await service.from("orders").update({ status: "failed" }).eq("id", order.id);
+    console.error(
+      `[khalti] pidx replay rejected order=${order.id} expected_order=${order.gateway_transaction_id} lookup_order=${lookup.purchase_order_id}`,
+    );
+    return NextResponse.redirect(
+      `${APP_URL()}/checkout/return?status=amount_mismatch&order=${order.id}`,
+    );
+  }
+
   // ── Amount check: reject any tampering. ──
   if (lookup.total_amount !== order.amount_cents) {
     await service
@@ -101,35 +116,29 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── Completed: atomic stock decrement. ──
-  const { data: decremented } = await service.rpc("decrement_stock", {
-    p_product_id: order.product_id,
+  // ── Completed: atomic fulfillment (H2 fix). ──
+  // fulfill_order locks the order row, checks status (idempotent), and
+  // decrements stock inside the same transaction — so concurrent/duplicate
+  // callbacks cannot double-decrement or double-transition.
+  const { data: result } = await service.rpc("fulfill_order", {
+    p_order: order.id,
+    p_transaction_id: lookup.transaction_id ?? parsed.purchase_order_id,
+    p_khalti_pidx: parsed.pidx,
   });
-  // The RPC returns the updated product row, or null if stock was already 0.
-  if (!decremented) {
-    // Oversold (race). Money has moved — flag for manual refund.
-    await service
-      .from("orders")
-      .update({
-        status: "failed",
-        needs_refund: true,
-        gateway_transaction_id: lookup.transaction_id ?? parsed.purchase_order_id,
-      })
-      .eq("id", order.id);
+  const outcome = (result as string | null) ?? "not_found";
+
+  if (outcome === "oversold") {
     console.error(`[khalti] oversold order=${order.id} — needs manual refund`);
     return NextResponse.redirect(
       `${APP_URL()}/checkout/return?status=oversold&order=${order.id}`,
     );
   }
+  if (outcome === "not_found") {
+    return NextResponse.redirect(`${APP_URL()}/checkout/return?status=not_found`);
+  }
 
-  await service
-    .from("orders")
-    .update({
-      status: "paid",
-      gateway_transaction_id: lookup.transaction_id ?? parsed.purchase_order_id,
-    })
-    .eq("id", order.id);
-
+  // 'paid' (this callback) or 'already_handled' (a prior callback already paid
+  // it) — either way the buyer sees a success page.
   return NextResponse.redirect(
     `${APP_URL()}/checkout/return?status=paid&order=${order.id}`,
   );
