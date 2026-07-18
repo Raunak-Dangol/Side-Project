@@ -151,3 +151,19 @@ export type StreamFeedItem = Stream & {
 export interface ChatMessageWithUser extends ChatMessage {
   profiles?: Pick<Profile, "id" | "display_name"> | null;
 }
+
+/**
+ * A stashed action a guest was trying to perform when the auth interceptor
+ * prompted them to sign in (P2-D). After a successful OAuth/magic-link round
+ * trip the stream view replays the intent: opens checkout, sends the follow,
+ * focuses chat. Stale or invalid intents are dropped silently.
+ *
+ * `streamId` is carried so the replay can verify the intent still belongs to
+ * the stream the viewer landed back on (avoids replaying a buy on the wrong
+ * stream after navigation).
+ */
+export type AuthIntent =
+  | { kind: "follow"; targetId: string; streamId: string }
+  | { kind: "chat"; streamId: string }
+  | { kind: "gift"; streamId: string }
+  | { kind: "buy"; productId: string; streamId: string };

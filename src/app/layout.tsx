@@ -1,10 +1,22 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import "@livekit/components-styles";
 
 export const metadata: Metadata = {
   title: "Live Shop",
   description: "Live shopping prototype — watch, chat, buy instantly.",
+};
+
+// viewportFit=cover enables env(safe-area-inset-*) on iOS so the immersive
+// stream overlays can inset themselves clear of notches / home indicators.
+// themeColor is light by default; dark surfaces (the stream view) override
+// per-route via their own viewport export where it matters.
+export const viewport: Viewport = {
+  viewportFit: "cover",
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#F4EFE6" },
+    { media: "(prefers-color-scheme: dark)", color: "#0B0F19" },
+  ],
 };
 
 export default function RootLayout({

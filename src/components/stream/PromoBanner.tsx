@@ -23,7 +23,7 @@ export default function PromoBanner({ text, link }: PromoBannerProps) {
   const interactive = Boolean(link);
 
   return (
-    <div className="absolute bottom-[112px] left-0 right-0 z-10 px-3">
+    <div className="absolute bottom-[112px] left-0 right-0 z-commerce px-3">
       <div
         role={interactive ? "button" : undefined}
         tabIndex={interactive ? 0 : undefined}

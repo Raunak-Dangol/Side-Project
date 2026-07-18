@@ -106,6 +106,18 @@ export default function StreamFeed({
 
   const goBrowse = useCallback(() => router.push("/browse"), [router]);
 
+  // §9.A: auto-advance to the next live stream when the active one ends. The
+  // StreamView of the active slide calls onEndedAdvance when its realtime
+  // subscription sees the status flip away from `live`. We delay briefly so the
+  // "stream has ended" card is readable before the swipe.
+  const advanceToNext = useCallback(() => {
+    if (activeIndex >= streams.length - 1) return; // last slide — nothing to do
+    const next = activeIndex + 1;
+    setActiveIndex(next);
+    const target = slideRefs.current[next];
+    target?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [activeIndex, streams.length]);
+
   // The feed is a DISCOVERY surface: everyone watches as a viewer here, even the
   // stream's owner. Auto-publishing a seller's camera/mic just because they
   // scrolled onto their own stream would be a surprise privacy hazard in a
@@ -142,6 +154,7 @@ export default function StreamFeed({
                   viewerId={viewerId}
                   viewerName={viewerName ?? undefined}
                   active
+                  onEndedAdvance={i === activeIndex ? advanceToNext : undefined}
                 />
               ) : (
                 <Poster stream={stream} />
@@ -156,7 +169,7 @@ export default function StreamFeed({
         type="button"
         onClick={goBrowse}
         aria-label="Browse streams"
-        className="absolute right-3 top-3 z-50 rounded-full bg-black/40 p-2 text-white/90 backdrop-blur-sm transition hover:bg-black/60"
+        className="absolute right-3 top-3 z-modal rounded-full bg-black/40 p-2 text-white/90 backdrop-blur-sm transition hover:bg-black/60"
       >
         <GridIcon />
       </button>

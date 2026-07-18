@@ -1,7 +1,9 @@
 import Link from "next/link";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { formatNpr } from "@/lib/utils";
-import type { Order, Product, Stream } from "@/lib/types";
+import type { Order, OrderStatus, Product, Stream } from "@/lib/types";
+import OrderStatusPoller from "@/components/checkout/OrderStatusPoller";
+import ReconciliationCard from "./ReconciliationCard";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +19,7 @@ const STATUS_COPY: Record<string, { title: string; body: string; tone: string }>
   },
   pending: {
     title: "Payment pending",
-    body: "Your payment is still processing. We'll reconcile it shortly.",
+    body: "Your payment is still processing. This page will update automatically when it confirms — no need to refresh.",
     tone: "amber",
   },
   failed: {
@@ -57,6 +59,16 @@ const STATUS_COPY: Record<string, { title: string; body: string; tone: string }>
   },
 };
 
+/**
+ * Maps a polled `OrderStatus` to the same `status` string the page uses for its
+ * `STATUS_COPY` lookup. `oversold` is a server-derived status (paid + needs_refund),
+ * not an OrderStatus literal, so it's synthesized here.
+ */
+function statusKeyFromOrder(s: OrderStatus, needsRefund: boolean): string {
+  if (s === "paid" && needsRefund) return "oversold";
+  return s; // paid / pending / failed map directly
+}
+
 export default async function CheckoutReturnPage({ searchParams }: PageProps) {
   const { status = "invalid", order: orderId } = await searchParams;
   const copy = STATUS_COPY[status] ?? STATUS_COPY.invalid;
@@ -92,18 +104,36 @@ export default async function CheckoutReturnPage({ searchParams }: PageProps) {
     }
   }
 
-  const tone = {
-    emerald: "bg-emerald-50 border-emerald-200 text-emerald-900",
-    amber: "bg-amber-50 border-amber-200 text-amber-900",
-    rose: "bg-rose-50 border-rose-200 text-rose-900",
-  }[copy.tone];
+  const tone =
+    {
+      emerald: "bg-emerald-50 border-emerald-200 text-emerald-900",
+      amber: "bg-amber-50 border-amber-200 text-amber-900",
+      rose: "bg-rose-50 border-rose-200 text-rose-900",
+    }[copy.tone] ?? "bg-rose-50 border-rose-200 text-rose-900";
 
   return (
     <div className="mx-auto max-w-md px-4 py-12">
-      <div className={`card border p-6 ${tone}`}>
-        <h1 className="text-xl font-semibold mb-1">{copy.title}</h1>
-        <p className="text-sm opacity-90">{copy.body}</p>
-      </div>
+      <ReconciliationCard
+        initialTone={tone}
+        initialTitle={copy.title}
+        initialBody={copy.body}
+      >
+        {/* The poller renders nothing; it reconciles the card above via its
+            onReconciled callback once the order row flips out of `pending`. */}
+        {order ? (
+          <OrderStatusPoller
+            orderId={order.id}
+            initialStatus={order.status}
+            onReconciled={(s, needsRefund) => {
+              const key = statusKeyFromOrder(s, needsRefund);
+              const ev = new CustomEvent("order-status-reconciled", {
+                detail: { key, copy: STATUS_COPY[key] ?? STATUS_COPY.invalid },
+              });
+              window.dispatchEvent(ev);
+            }}
+          />
+        ) : null}
+      </ReconciliationCard>
 
       {order && product ? (
         <div className="card p-4 mt-4 text-sm">
@@ -154,3 +184,4 @@ export default async function CheckoutReturnPage({ searchParams }: PageProps) {
     </div>
   );
 }
+

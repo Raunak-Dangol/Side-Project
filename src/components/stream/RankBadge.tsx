@@ -66,7 +66,7 @@ export default function RankBadge({ streamId, viewerCount }: RankBadgeProps) {
   if (rank == null) return null;
 
   return (
-    <div className="pointer-events-none absolute left-[12px] top-[52px] z-10">
+    <div className="pointer-events-none absolute left-[12px] top-[52px] z-hud">
       <span className="inline-flex items-center gap-1 rounded-full bg-black/45 px-2 py-0.5 text-[10px] font-medium text-white backdrop-blur-sm">
         🔥 <span className="text-gold-light">hourly rank #{rank}</span>
       </span>

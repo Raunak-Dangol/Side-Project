@@ -48,4 +48,15 @@ export const serverEnv = {
   /** Optional Upstash Redis — enables the shared rate limiter when set. */
   upstashRedisRestUrl: process.env.UPSTASH_REDIS_REST_URL ?? null,
   upstashRedisRestToken: process.env.UPSTASH_REDIS_REST_TOKEN ?? null,
+
+  /**
+   * Optional payment-gateway webhook secrets. When set, the `/api/checkout/.../webhook`
+   * routes verify incoming webhook signatures with these. Both are ADDITIVE to the
+   * redirect-callback flow (the redirect callback remains the primary path); the
+   * webhook only reconciles payments that lost their redirect (buyer closed the
+   * tab, network blip) so a `Completed` payment doesn't strand the order in
+   * `pending` forever. Null = webhook route 401s (webhook disabled in this env).
+   */
+  khaltiWebhookSecret: process.env.KHALTI_WEBHOOK_SECRET ?? null,
+  esewaWebhookSecret: process.env.ESEWA_WEBHOOK_SECRET ?? null,
 } as const;

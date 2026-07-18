@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vitest";
 
 /**
  * StreamRoom activation tests — token fetch, abort, stale-response guard.
@@ -12,8 +12,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
  */
 
 describe("StreamRoom token effect", () => {
-  let fetchMock: ReturnType<typeof vi.fn>;
-  let abortController: { signal: AbortSignal; abort: ReturnType<typeof vi.fn> };
+  let fetchMock: Mock;
+  let abortController: { signal: AbortSignal; abort: Mock };
 
   beforeEach(() => {
     abortController = {

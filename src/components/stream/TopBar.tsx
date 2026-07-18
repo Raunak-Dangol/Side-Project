@@ -40,7 +40,12 @@ export default function TopBar({
   const router = useRouter();
 
   return (
-    <div className="absolute left-[12px] right-[12px] top-[12px] z-10 flex items-center gap-2">
+    // top position adds the iOS safe-area inset so the bar clears notches /
+    // status bars on devices that have them (no-op where the inset is 0).
+    <div
+      className="absolute left-[12px] right-[12px] z-hud flex items-center gap-2"
+      style={{ top: "calc(12px + env(safe-area-inset-top))" }}
+    >
       {/* Seller identity */}
       <div className="flex items-center gap-2 rounded-full bg-black/40 py-1 pl-1 pr-3 backdrop-blur-sm">
         {seller ? (

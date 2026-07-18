@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useAuthInterceptor } from "@/components/auth/AuthInterceptorProvider";
+import { useModeration } from "@/components/stream/ModerationMenu";
 
 interface BottomActionBarProps {
   streamId: string;
@@ -8,6 +10,8 @@ interface BottomActionBarProps {
   onOpenChat: () => void;
   /** Sends a gift reaction (delegates to the same flush path as the rail). */
   onSendGift: () => void;
+  /** The stream's seller, for the ⋯ overflow moderation menu (P2-E). */
+  seller?: { id: string; display_name: string | null } | null;
 }
 
 /**
@@ -16,20 +20,33 @@ interface BottomActionBarProps {
  * message } — just styled to fit the Douyin overlay. On success the new message
  * arrives via the realtime subscription owned by StreamView (so it shows up in
  * both the bullet view and the full chat log) and the input clears.
+ *
+ * Guest gate (P2-D): chat send + gift both prompt the auth sheet for anon
+ * viewers instead of firing a 401. The chat intent also opens the chat-log
+ * overlay on replay so the viewer lands where they can type.
+ *
+ * Moderation (P2-E): the ⋯ overflow opens the ModerationMenu targeting the
+ * seller (replaces the previous dead "TODO" placeholder). Message-level
+ * moderation is reachable via long-press inside ChatLog.
  */
 export default function BottomActionBar({
   streamId,
   onOpenChat,
   onSendGift,
+  seller,
 }: BottomActionBarProps) {
   const [draft, setDraft] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { requireAuth } = useAuthInterceptor();
+  const mod = useModeration();
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
     const text = draft.trim();
     if (!text || pending) return;
+    // Guest gate: anon viewers get the auth sheet, not a 401.
+    if (!requireAuth({ kind: "chat", streamId })) return;
     setError(null);
     setPending(true);
     try {
@@ -52,7 +69,12 @@ export default function BottomActionBar({
   }
 
   return (
-    <div className="absolute bottom-[50px] left-[12px] right-[12px] z-10">
+    // bottom offset stacks on top of the home-indicator safe area so the input
+    // never sits under the gesture bar on iPhones (no-op where the inset is 0).
+    <div
+      className="absolute left-[12px] right-[12px] z-hud"
+      style={{ bottom: "calc(50px + env(safe-area-inset-bottom))" }}
+    >
       <form onSubmit={send} className="flex items-center gap-2">
         {/* Chat input — same /api/chat write path as the legacy ChatPanel. */}
         <input
@@ -64,11 +86,14 @@ export default function BottomActionBar({
           disabled={pending}
         />
 
-        {/* Gift — triggers the gift reaction (no virtual-currency economy). */}
+        {/* Gift — triggers the gift reaction (no virtual-currency economy).
+            Guest-gated: anon viewers get the auth sheet instead of a 401. */}
         <button
           type="button"
           aria-label="Send gift"
-          onClick={onSendGift}
+          onClick={() => {
+            if (requireAuth({ kind: "gift", streamId })) onSendGift();
+          }}
           className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/40 text-base text-gold backdrop-blur-sm transition hover:bg-black/60 active:scale-90"
         >
           🎁
@@ -84,15 +109,24 @@ export default function BottomActionBar({
           💬
         </button>
 
-        {/* More — placeholder, no real menu in the prototype. */}
-        {/* TODO (post-prototype): overflow menu (share, report, etc.) */}
-        <button
-          type="button"
-          aria-label="More"
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/40 text-base text-white backdrop-blur-sm transition hover:bg-black/60"
-        >
-          ⋯
-        </button>
+        {/* More — opens the moderation menu targeting the seller (P2-E).
+            Replaces the previous dead "TODO" overflow. Hidden when the
+            viewer isn't signed in or there's no seller to target. */}
+        {seller && seller.id ? (
+          <button
+            type="button"
+            aria-label="More options"
+            onClick={() =>
+              mod?.openModeration({
+                userId: seller.id,
+                displayName: seller.display_name,
+              })
+            }
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-black/40 text-base text-white backdrop-blur-sm transition hover:bg-black/60 active:scale-90"
+          >
+            ⋯
+          </button>
+        ) : null}
       </form>
       {error ? (
         <p className="mt-1 px-2 text-[10px] text-rose-300">{error}</p>

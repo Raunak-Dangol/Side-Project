@@ -119,8 +119,8 @@ describe("StreamFeed document visibility", () => {
 
   it("effective active is false when visible but not centered", () => {
     const documentVisible = true;
-    const activeIndex = 2;
-    const index = 3;
+    const activeIndex: number = 2;
+    const index: number = 3;
     const isActive = documentVisible && index === activeIndex;
     expect(isActive).toBe(false);
   });

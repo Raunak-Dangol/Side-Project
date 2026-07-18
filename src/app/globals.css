@@ -90,3 +90,136 @@ body {
     transform: translateY(0);
   }
 }
+
+/* ── Resilience-state animations (Phase 1 §9.A) ──────────────────────────── */
+
+/* Soft pulse for the reconnecting/buffering spinner over the cinema canvas.
+   Gentler than the default Tailwind animate-spin — reads as "working", not
+   "alarmed". Gated behind prefers-reduced-motion below. */
+@keyframes pulse-soft {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: scale(0.92);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1.08);
+  }
+}
+
+/* Skeleton shimmer for loading states (placeholder until skeleton components
+   land in a later phase; used by the connection states). */
+@keyframes shimmer {
+  from {
+    background-position: -200% 0;
+  }
+  to {
+    background-position: 200% 0;
+  }
+}
+
+/* ── Phase 2 engagement animations ──────────────────────────────────────── */
+
+/* Floating reaction heart: rises from the tap origin up the screen along a
+   randomized bezier, fading + scaling slightly. Driven by CSS variables set
+   inline per-particle (--hx: end horizontal offset, --hcurve: horizontal
+   displacement at the curve's midpoint, --hduration: total rise time, --hrotate:
+   final rotation). One keyframe serves every particle.
+   Gated behind prefers-reduced-motion at the bottom of this file. */
+@keyframes heart-rise {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.6);
+  }
+  10% {
+    opacity: 1;
+  }
+  50% {
+    /* Bezier midpoint: drift horizontally by --hcurve while rising. */
+    transform: translate(var(--hcurve, 0px), -50vh) scale(1.1) rotate(calc(var(--hrotate, 0deg) / 2));
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--hx, 0px), -75vh) scale(0.9) rotate(var(--hrotate, 0deg));
+  }
+}
+
+/* Danmu bullet drift (P2-C): the pill enters from the right edge and travels
+   to the left across its lane. Driven by --b-duration per-pill.
+   Reduced-motion collapses this to a fade via the global media query. */
+@keyframes bullet-drift {
+  from {
+    transform: translateX(100%);
+  }
+  to {
+    transform: translateX(calc(-100% - 100vw));
+  }
+}
+
+/* Purchase ticker pill entrance/exit (P2-B). */
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+@keyframes pill-out {
+  from {
+    opacity: 1;
+    transform: translateX(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+}
+
+/* ── Utilities for the immersive stream view ─────────────────────────────── */
+
+@layer utilities {
+  /* Contrast scrim behind HUD text floating over video (plan §9.C): a subtle
+     vertical gradient keeps copy legible over bright/busy feeds without
+     dimming the whole frame. Apply on the text container, not the video. */
+  .text-scrim {
+    background-image: linear-gradient(
+      to bottom,
+      rgba(11, 15, 25, 0.55) 0%,
+      rgba(11, 15, 25, 0) 100%
+    );
+  }
+  .text-scrim-bottom {
+    background-image: linear-gradient(
+      to top,
+      rgba(11, 15, 25, 0.6) 0%,
+      rgba(11, 15, 25, 0) 100%
+    );
+  }
+
+  /* Reconnecting spinner — pulse-soft driven. */
+  .animate-pulse-soft {
+    animation: pulse-soft 1.4s ease-in-out infinite;
+  }
+}
+
+/* ── Reduced motion: respect the OS preference (plan §9.C) ─────────────────
+   Every ambient/celebratory animation is neutralized here so vestibular-
+   sensitive users get stable, fade-only feedback. Individual components opt
+   in via these keyframe names; this block is the single chokepoint. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+  /* Keep bullets/sheets VISIBLE (they animate via opacity); the global rule
+     above collapses their duration so they appear instantly instead of
+     drifting/sliding. No element ends up hidden due to a `forwards` fill. */
+}

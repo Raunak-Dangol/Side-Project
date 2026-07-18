@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import StreamRoom from "@/components/StreamRoom";
 import TopBar, { type PresenceViewer } from "@/components/stream/TopBar";
 import BulletComments from "@/components/stream/BulletComments";
+import ChatLog from "@/components/stream/ChatLog";
 import ProductCard from "@/components/stream/ProductCard";
 import CheckoutSheet from "@/components/stream/CheckoutSheet";
 import ReactionRail from "@/components/stream/ReactionRail";
@@ -11,7 +12,18 @@ import PurchaseTicker from "@/components/stream/PurchaseTicker";
 import RankBadge from "@/components/stream/RankBadge";
 import PromoBanner from "@/components/stream/PromoBanner";
 import BottomActionBar from "@/components/stream/BottomActionBar";
+import StreamEndedCard from "@/components/stream/StreamEndedCard";
+import ConnectionOverlay, {
+  type ConnectionState,
+} from "@/components/stream/ConnectionOverlay";
+import { ModerationProvider, useModeration } from "@/components/stream/ModerationMenu";
+import type { StreamConnState } from "@/components/StreamRoom";
+import {
+  AuthInterceptorProvider,
+  consumeStashedIntent,
+} from "@/components/auth/AuthInterceptorProvider";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
+import { removeChannelSilently } from "@/lib/realtime-cleanup";
 import { escapeForRender } from "@/lib/sanitize";
 import { timeAgo } from "@/lib/utils";
 import type { StreamFeedSeller, Product, Stream, ChatMessageWithUser } from "@/lib/types";
@@ -30,6 +42,12 @@ interface StreamViewProps {
    * page is unaffected.
    */
   active?: boolean;
+  /**
+   * Called when this stream ends while the viewer is watching (status flips
+   * away from `live`). In the feed this advances to the next live stream; on
+   * the detail page it's omitted and the StreamEndedCard shows a back link.
+   */
+  onEndedAdvance?: () => void;
 }
 
 /**
@@ -52,11 +70,22 @@ export default function StreamView({
   viewerId,
   viewerName,
   active,
+  onEndedAdvance,
 }: StreamViewProps) {
   const supabase = createSupabaseBrowserClient();
   const isActive = active ?? true;
   // Feed mode: fill the parent slide. Detail page (active undefined): phone frame.
   const inFeed = active !== undefined;
+  // Whether this stream has ended while the viewer was watching it (plan §9.A).
+  // Driven by the streams-row subscription below; resets on stream change.
+  const [ended, setEnded] = useState<Stream["status"] | null>(
+    stream.status === "live" ? null : stream.status,
+  );
+  // §9.A — aggregated connection state surfaced by StreamRoom's token-fetch +
+  // LiveKit lifecycle. Drives the ConnectionOverlay over the cinema canvas.
+  const [connState, setConnState] = useState<ConnectionState>("connecting");
+  // Bumped to force StreamRoom out of a Failed state and retry the token fetch.
+  const [retryToken, setRetryToken] = useState(0);
 
   // ── Presence: single source of truth for viewer count + recent-joiner stack ──
   // One channel for the whole stream; every client tracks itself and reacts to
@@ -70,11 +99,51 @@ export default function StreamView({
   // ChatPanel, kept here so all realtime wiring lives in one place.
   const [messages, setMessages] = useState<ChatMessageWithUser[]>([]);
   const [chatLogOpen, setChatLogOpen] = useState(false);
-  const chatScrollRef = useRef<HTMLDivElement>(null);
+
+  // ── Moderation (P2-E): the viewer's block list, loaded on activation. ──
+  // Filters both the bullet layer and the chat log so blocked/muted users'
+  // messages never render for the blocker. Anon viewers have no block list.
+  const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!isActive || !viewerId) {
+      setBlockedIds(new Set());
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/block", { cache: "no-store" });
+        if (!res.ok) return;
+        const data = (await res.json()) as { blockedIds: string[] };
+        if (cancelled) return;
+        setBlockedIds(new Set(data.blockedIds ?? []));
+      } catch {
+        // best-effort; the viewer just sees an unfiltered chat.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isActive, viewerId]);
+
+  // Apply block + mute filters to the messages feeding both the bullet window
+  // and the chat log. `mutedIds` comes from the ModerationProvider below, so
+  // this component reads it via a child wrapper (see FilteredChatLog). Here we
+  // only filter on `blockedIds` (owned in this component); mute filtering is
+  // applied in the render path that has access to the moderation context.
+  const visibleMessages = useMemo(
+    () =>
+      viewerId
+        ? messages.filter((m) => !blockedIds.has(m.user_id))
+        : messages,
+    [messages, blockedIds, viewerId],
+  );
+
   // Newest-first window for the bullet overlay (FIFO cap lives in BulletComments).
   const bulletWindow = useMemo(
-    () => [...messages].reverse(),
-    [messages],
+    () => [...visibleMessages].reverse(),
+    [visibleMessages],
   );
 
   useEffect(() => {
@@ -121,18 +190,9 @@ export default function StreamView({
 
     return () => {
       cancelled = true;
-      if (channel) supabase.removeChannel(channel);
+      void removeChannelSilently(supabase, channel);
     };
   }, [supabase, stream.id, isActive]);
-
-  // Keep the full chat log scrolled to the latest while open.
-  useEffect(() => {
-    if (!chatLogOpen) return;
-    chatScrollRef.current?.scrollTo({
-      top: chatScrollRef.current.scrollHeight,
-      behavior: "smooth",
-    });
-  }, [messages, chatLogOpen]);
 
   // ── Pinned product: watch the stream row for pin/unpin changes (same ──
   // subscription pattern as the legacy PinnedProduct component). Tapping the
@@ -169,11 +229,16 @@ export default function StreamView({
           setPinnedId(updated.pinned_product_id);
           setPromoText(updated.promo_banner_text);
           setPromoLink(updated.promo_banner_link);
+          // §9.A: detect the stream ending while the viewer watches. Once it
+          // flips away from `live`, show the ended card instead of a frozen
+          // feed. (A later re-broadcast would re-live the stream; until then
+          // the card stays.)
+          if (updated.status !== "live") setEnded(updated.status);
         },
       )
       .subscribe();
     return () => {
-      supabase.removeChannel(channel);
+      void removeChannelSilently(supabase, channel);
     };
   }, [supabase, stream.id, isActive]);
 
@@ -255,7 +320,7 @@ export default function StreamView({
 
     return () => {
       cancelled = true;
-      if (channel) supabase.removeChannel(channel);
+      void removeChannelSilently(supabase, channel);
     };
   }, [supabase, stream.id, isActive]);
 
@@ -271,6 +336,56 @@ export default function StreamView({
     } catch {
       // Best-effort; the live total still syncs via realtime for everyone.
     }
+  }, [stream.id]);
+
+  // ── P2-D: intent replay ──────────────────────────────────────────────────
+  // After a guest signs in via the auth half-sheet, OAuth/magic-link returns the
+  // browser to this stream (via /auth/callback?next=/stream/<id>). On mount, if
+  // there's a stashed intent AND the viewer is now authed AND the intent belongs
+  // to this stream, replay the action they were trying to perform. Stale or
+  // mismatched intents are dropped silently (the intent is already consumed by
+  // `consumeStashedIntent`, so it can't re-fire on a later visit).
+  useEffect(() => {
+    if (!isActive) return; // never replay on an inactive feed slide
+    const intent = consumeStashedIntent();
+    if (!intent || intent.streamId !== stream.id) return;
+    // Only replay if the viewer is now actually signed in. An anon viewer landing
+    // here with a stale intent (e.g. they didn't complete sign-in) gets nothing.
+    if (!viewerId) return;
+
+    // Defer state updates off the effect body so we don't trigger a synchronous
+    // re-render during the commit phase (react-hooks/set-state-in-effect). The
+    // microtask runs after the current paint, before the next render — fast
+    // enough that the replay still feels instant, but non-cascading.
+    switch (intent.kind) {
+      case "buy":
+        // Re-open the checkout sheet on the same product, if it's still pinned.
+        if (pinnedProduct?.id === intent.productId) {
+          queueMicrotask(() => setIsCheckoutOpen(true));
+        }
+        break;
+      case "follow":
+        // Fire the follow directly — idempotent (duplicate = 200 alreadyFollowing).
+        // We don't touch FollowButton's local state; the next page load resolves
+        // initiallyFollowing server-side, so the button reflects the new edge.
+        void fetch("/api/follow", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ followeeId: seller?.id ?? "" }),
+        }).catch(() => {
+          // best-effort; the follow can be re-tapped manually.
+        });
+        break;
+      case "chat":
+        // Open the chat-log overlay so the viewer lands where they can type.
+        queueMicrotask(() => setChatLogOpen(true));
+        break;
+      case "gift":
+        void triggerGift();
+        break;
+    }
+    // Run once per stream mount; deps are intentionally the identities involved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [stream.id]);
 
   useEffect(() => {
@@ -350,7 +465,7 @@ export default function StreamView({
 
     return () => {
       cancelled = true;
-      if (channel) supabase.removeChannel(channel);
+      void removeChannelSilently(supabase, channel);
     };
   }, [supabase, stream.id, viewerId, viewerName, isActive]);
 
@@ -365,23 +480,54 @@ export default function StreamView({
   }, [isActive]);
 
   return (
-    <div
-      className={
-        inFeed
-          ? "relative h-full w-full overflow-hidden bg-black"
-          : "relative mx-auto h-[100dvh] w-full overflow-hidden bg-black md:h-[760px] md:max-w-[420px]"
-      }
+    <AuthInterceptorProvider
+      viewerId={viewerId}
+      redirectTo={`/stream/${stream.id}`}
     >
-      {/* ── Base layer: the LiveKit video/participant view (z-0) ── */}
-      <div className="absolute inset-0 z-0">
+      <ModerationProvider streamId={stream.id} initialBlockedIds={blockedIds}>
+        <div
+        className={
+          inFeed
+            ? "relative h-full w-full overflow-hidden bg-cinema"
+            : "relative mx-auto h-[100dvh] w-full overflow-hidden bg-cinema md:h-[760px] md:max-w-[420px]"
+        }
+      >
+        {/* ── Base layer: the LiveKit video/participant view (z-video) ── */}
+        <div className="absolute inset-0 z-video">
         <StreamRoom
           stream={stream}
           role={role}
           viewerId={viewerId}
           viewerName={viewerName}
           active={isActive}
+          onConnectionStateChange={(s: StreamConnState) => setConnState(s)}
+          retryToken={retryToken}
         />
       </div>
+
+      {/* ── §9.A: connection-state overlay (connecting / reconnecting / ──
+          buffering / failed). Rendered above the video base so a transient
+          network blip or a dropped LiveKit connection never shows as a silent
+          black screen. The "failed" Retry button bumps retryToken, which
+          StreamRoom watches to restart the token-fetch sequence. */}
+      {connState !== "connected" ? (
+        <ConnectionOverlay
+          state={connState}
+          onRetry={() => setRetryToken((n) => n + 1)}
+        />
+      ) : null}
+
+      {/* ── §9.A: "stream ended" card. Renders when the live row flipped away ──
+          from `live` while the viewer was watching. In the feed it auto-advances
+          via onEndedAdvance; on the detail page it offers a back-to-feed link. */}
+      {ended ? (
+        <StreamEndedCard
+          seller={seller}
+          viewerId={viewerId}
+          onNext={onEndedAdvance}
+          detailMode={!inFeed}
+        />
+      ) : null}
 
       {/* ── TopBar (step 3) ── */}
       <TopBar
@@ -406,41 +552,14 @@ export default function StreamView({
 
       {/* ── Full chat log overlay (step 4): reachable ambient→history view ──
           The bullet view is atmosphere only; this scrollable list is the real
-          conversation reader. Toggled from BottomActionBar's message icon. */}
+          conversation reader. Toggled from BottomActionBar's message icon. The
+          ChatLog component owns its own scroll-to-bottom + mute filtering
+          (P2-E) and is long-pressable to open the ModerationMenu. */}
       {chatLogOpen ? (
-        <div className="absolute inset-x-0 bottom-0 z-40 flex h-[55%] flex-col rounded-t-xl bg-black/80 backdrop-blur-md">
-          <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-            <span className="text-xs font-medium text-white">Live chat</span>
-            <button
-              type="button"
-              onClick={() => setChatLogOpen(false)}
-              aria-label="Close chat"
-              className="text-white/70 transition hover:text-white"
-            >
-              ✕
-            </button>
-          </div>
-          <div
-            ref={chatScrollRef}
-            className="flex-1 space-y-1.5 overflow-y-auto p-3 text-sm"
-          >
-            {messages.length === 0 ? (
-              <p className="text-xs text-white/50">No messages yet. Say hi 👋</p>
-            ) : (
-              messages.map((m) => (
-                <div key={m.id} className="leading-snug">
-                  <span className="font-medium text-sky-300">
-                    {m.profiles?.display_name ?? "Someone"}
-                  </span>{" "}
-                  <span className="text-[10px] text-white/40">
-                    {timeAgo(m.created_at)}
-                  </span>
-                  <div className="text-white/90">{escapeForRender(m.message)}</div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
+        <ChatLog
+          messages={visibleMessages}
+          onClose={() => setChatLogOpen(false)}
+        />
       ) : null}
 
       {/* ── ProductCard + CheckoutSheet (step 5) ──
@@ -466,11 +585,14 @@ export default function StreamView({
       <PromoBanner text={promoText} link={promoLink} />
 
       {/* ── BottomActionBar (step 10): chat input + gift/message/more ── */}
-      <BottomActionBar
-        streamId={stream.id}
-        onOpenChat={() => setChatLogOpen(true)}
-        onSendGift={triggerGift}
-      />
-    </div>
+          <BottomActionBar
+            streamId={stream.id}
+            onOpenChat={() => setChatLogOpen(true)}
+            onSendGift={triggerGift}
+            seller={seller}
+          />
+        </div>
+      </ModerationProvider>
+    </AuthInterceptorProvider>
   );
 }

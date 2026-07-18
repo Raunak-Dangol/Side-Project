@@ -20,7 +20,7 @@ interface ProductCardProps {
 export default function ProductCard({ product, onBuy }: ProductCardProps) {
   const soldOut = product.stock <= 0;
   return (
-    <div className="absolute bottom-[150px] right-[12px] z-10 flex w-[96px] flex-col overflow-hidden rounded-lg bg-white/95 shadow-lg backdrop-blur-sm">
+    <div className="absolute bottom-[150px] right-[12px] z-commerce flex w-[96px] flex-col overflow-hidden rounded-lg bg-white/95 shadow-lg backdrop-blur-sm">
       <button
         type="button"
         onClick={onBuy}

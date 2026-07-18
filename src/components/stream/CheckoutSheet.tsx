@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { formatNpr } from "@/lib/utils";
 import type { Product, PaymentGateway } from "@/lib/types";
+import { useAuthInterceptor } from "@/components/auth/AuthInterceptorProvider";
 
 interface CheckoutSheetProps {
   open: boolean;
@@ -21,6 +22,10 @@ interface CheckoutSheetProps {
  * modal) and its close affordances changed. The actual payment verification,
  * stock decrement, and order transition all happen in the untouched callback
  * routes — this component only kicks off the redirect.
+ *
+ * Guest gate (P2-D): the money flow itself is untouched — this gate only blocks
+ * the *trigger*. An anon viewer who taps Buy gets the auth sheet; once signed
+ * in, the stream view's intent replay re-opens this sheet on the same product.
  */
 export default function CheckoutSheet({
   open,
@@ -30,11 +35,17 @@ export default function CheckoutSheet({
 }: CheckoutSheetProps) {
   const [loading, setLoading] = useState<PaymentGateway | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const { requireAuth } = useAuthInterceptor();
 
   if (!open) return null;
 
   async function startCheckout(gateway: PaymentGateway) {
     setError(null);
+    // Guest gate: bail (and open the auth sheet) before touching the payment
+    // flow. The money path below never runs for anon viewers.
+    if (!requireAuth({ kind: "buy", productId: product.id, streamId })) {
+      return;
+    }
     setLoading(gateway);
     try {
       const res = await fetch("/api/checkout/initiate", {
@@ -69,9 +80,9 @@ export default function CheckoutSheet({
   }
 
   return (
-    // Backdrop closes the sheet on click. z-50 sits above every other overlay.
+    // Backdrop closes the sheet on click. z-modal sits above every other overlay.
     <div
-      className="absolute inset-0 z-50 flex items-end bg-black/50"
+      className="absolute inset-0 z-modal flex items-end bg-black/50"
       onClick={onClose}
     >
       {/* The sheet itself stops propagation so taps inside don't close it. */}

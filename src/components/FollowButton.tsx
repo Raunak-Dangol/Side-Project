@@ -1,12 +1,16 @@
 "use client";
 
 import { useState } from "react";
+import { haptic } from "@/lib/haptics";
+import { useAuthInterceptor } from "@/components/auth/AuthInterceptorProvider";
 
 interface FollowButtonProps {
   targetId: string;
   initiallyFollowing: boolean;
   disabled?: boolean;
   className?: string;
+  /** Current stream id, used to scope the auth-intent replay (P2-D). */
+  streamId?: string;
 }
 
 /**
@@ -14,24 +18,35 @@ interface FollowButtonProps {
  * DELETE to unfollow) which RLS-scopes to the current user. On any non-2xx
  * response the optimistic toggle is reverted; a successful duplicate-follow
  * returns 200 { ok: true, alreadyFollowing: true } and is treated as success.
+ *
+ * Guest gate (P2-D): an anon viewer's tap opens the auth half-sheet (via the
+ * interceptor) instead of firing a request that would 401. The stream id scopes
+ * the stashed intent so the replay only fires on the stream the viewer was on.
  */
 export default function FollowButton({
   targetId,
   initiallyFollowing,
   disabled,
   className,
+  streamId,
 }: FollowButtonProps) {
   const [following, setFollowing] = useState(initiallyFollowing);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const { requireAuth } = useAuthInterceptor();
 
   async function toggle() {
     if (busy || disabled) return;
+    // Guest gate: bail (and open the auth sheet) if not signed in.
+    if (!requireAuth({ kind: "follow", targetId, streamId: streamId ?? "" })) {
+      return;
+    }
     setBusy(true);
     setError(null);
 
     const next = !following;
     setFollowing(next); // optimistic
+    haptic(); // tactile confirm on toggle (no-op on desktop/iOS)
 
     try {
       let res: Response;

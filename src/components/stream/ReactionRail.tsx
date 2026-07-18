@@ -1,6 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { haptic } from "@/lib/haptics";
+import {
+  useReactionHearts,
+  ReactionHeartsLayer,
+} from "@/components/stream/ReactionHearts";
 
 type ReactionKind = "heart" | "gift";
 
@@ -10,11 +15,15 @@ interface ReactionRailProps {
   totals: { heart: number; gift: number };
 }
 
+/** Hold duration (ms) beyond which a heart press is treated as a burst. */
+const LONG_PRESS_MS = 450;
+
 /**
- * Floating heart/gift tap targets on the right edge. Tap behaviour:
- *   - A local `useRef` counter increments immediately for instant visual
- *     feedback (no network round-trip wait).
+ * Floating heart/gift tap targets on the right edge (plan §3.4). Tap behaviour:
+ *   - A local `useRef` counter increments immediately for instant feedback.
  *   - A 400ms scale/opacity "pop" keyframe plays on the tapped icon.
+ *   - Hearts emit as rising particles via useReactionHearts; a long-press
+ *     (≥450ms hold) on the heart fires a burst of 5.
  *   - Every 2s, if the pending count is >0, ONE batched POST flushes it via
  *     /api/streams/[id]/react and resets the local pending count.
  *
@@ -32,10 +41,46 @@ export default function ReactionRail({ streamId, totals }: ReactionRailProps) {
   const [popGift, setPopGift] = useState(0);
   const [flushError, setFlushError] = useState(false);
 
+  // Particle system — hearts rise from the heart button's vertical center. The
+  // rail sits at top-[110px] with a 40px-tall button; the first button center
+  // is ~110 + 20 = 130px. We emit from there.
+  const hearts = useReactionHearts(130);
+
   function tap(kind: ReactionKind) {
     pending.current[kind] += 1;
-    if (kind === "heart") setPopHeart((n) => n + 1);
-    else setPopGift((n) => n + 1);
+    if (kind === "heart") {
+      setPopHeart((n) => n + 1);
+      hearts.emit("♥");
+    } else {
+      setPopGift((n) => n + 1);
+      hearts.emit("🎁", 1.3);
+    }
+    haptic(); // instant tactile feedback per tap (no-op on desktop/iOS)
+  }
+
+  // ── Long-press burst on the heart ────────────────────────────────────────
+  // On pointerdown start a timer; if it fires before pointerup, we're in
+  // "burst mode" — emit a fan of hearts and re-buzz. Any subsequent move cancels
+  // (so a scroll isn't misread as a hold).
+  const pressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const burstedRef = useRef(false);
+
+  function startHeartPress() {
+    burstedRef.current = false;
+    pressTimerRef.current = setTimeout(() => {
+      burstedRef.current = true;
+      hearts.burst(5, "♥");
+      // 5 hearts count toward the pending batch; flush as a single amount.
+      pending.current.heart += 4; // +1 from the initial tap below is folded in
+      setPopHeart((n) => n + 1);
+      haptic(30);
+    }, LONG_PRESS_MS);
+  }
+  function endHeartPress() {
+    if (pressTimerRef.current) {
+      clearTimeout(pressTimerRef.current);
+      pressTimerRef.current = null;
+    }
   }
 
   // Batched flush every 2s.
@@ -69,25 +114,38 @@ export default function ReactionRail({ streamId, totals }: ReactionRailProps) {
   }, [streamId]);
 
   return (
-    <div className="absolute right-[14px] top-[110px] z-10 flex flex-col items-center gap-3">
-      <ReactionButton
-        icon="♥"
-        label="heart"
-        count={totals.heart}
-        popKey={popHeart}
-        onClick={() => tap("heart")}
-      />
-      <ReactionButton
-        icon="🎁"
-        label="gift"
-        count={totals.gift}
-        popKey={popGift}
-        onClick={() => tap("gift")}
-      />
-      {flushError ? (
-        <span className="text-[9px] text-white/50">retrying…</span>
-      ) : null}
-    </div>
+    <>
+      <ReactionHeartsLayer particles={hearts.particles} originY={hearts.originY} />
+      <div className="absolute right-[14px] top-[110px] z-interactive flex flex-col items-center gap-3">
+        <ReactionButton
+          icon="♥"
+          label="heart"
+          count={totals.heart}
+          popKey={popHeart}
+          onClick={() => {
+            // A normal tap: if the long-press burst already fired, don't double-count.
+            if (burstedRef.current) {
+              burstedRef.current = false;
+              return;
+            }
+            tap("heart");
+          }}
+          onPointerDown={startHeartPress}
+          onPointerUp={endHeartPress}
+          onPointerLeave={endHeartPress}
+        />
+        <ReactionButton
+          icon="🎁"
+          label="gift"
+          count={totals.gift}
+          popKey={popGift}
+          onClick={() => tap("gift")}
+        />
+        {flushError ? (
+          <span className="text-[9px] text-white/50">retrying…</span>
+        ) : null}
+      </div>
+    </>
   );
 }
 
@@ -97,12 +155,18 @@ function ReactionButton({
   count,
   popKey,
   onClick,
+  onPointerDown,
+  onPointerUp,
+  onPointerLeave,
 }: {
   icon: string;
   label: string;
   count: number;
   popKey: number;
   onClick: () => void;
+  onPointerDown?: () => void;
+  onPointerUp?: () => void;
+  onPointerLeave?: () => void;
 }) {
   return (
     <div className="flex flex-col items-center gap-0.5">
@@ -110,6 +174,9 @@ function ReactionButton({
         type="button"
         aria-label={`Send ${label}`}
         onClick={onClick}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onPointerLeave={onPointerLeave}
         className="flex h-10 w-10 items-center justify-center rounded-full bg-black/35 text-lg text-gold backdrop-blur-sm transition hover:bg-black/55 active:scale-90"
       >
         {/* popKey changes on every tap → key change remounts the span → the
