@@ -194,6 +194,11 @@ function SellerVideo({
 
   // Reactive track collection including unsubscribed pubs. Placeholders keep
   // the identity present even before a camera track is published.
+  // updateOnlyOn includes TrackSubscriptionStatusChanged and
+  // TrackSubscriptionPermissionChanged so the hook re-renders when the
+  // subscription we explicitly requested actually completes — without these,
+  // the viewer would render the "Buffering…" overlay even after the track
+  // arrives in the browser.
   const allTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
@@ -206,6 +211,10 @@ function SellerVideo({
         RoomEvent.TrackUnpublished,
         RoomEvent.TrackSubscribed,
         RoomEvent.TrackUnsubscribed,
+        RoomEvent.TrackSubscriptionStatusChanged,
+        RoomEvent.TrackSubscriptionPermissionChanged,
+        RoomEvent.TrackSubscriptionFailed,
+        RoomEvent.TrackStreamStateChanged,
         RoomEvent.TrackMuted,
         RoomEvent.TrackUnmuted,
         RoomEvent.ParticipantConnected,
@@ -447,19 +456,24 @@ function LiveKitStateBridge({
 }) {
   const state = useConnectionState();
   useEffect(() => {
-    // For viewers, SellerVideo owns the buffering/connected signal once the
-    // room is up. The bridge only reports transport-level states so we don't
-    // stomp "buffering" with a premature "connected".
+    // SOLE-AUTHORITY RULE: for viewers, SellerVideo owns buffering/connected
+    // (it knows the camera-subscription state). This bridge must ONLY report
+    // transport-level failure states for viewers — never "connecting" or
+    // "buffering" — otherwise the bridge's "connecting" (fired during the WS
+    // handshake, before tracks exist) stomps SellerVideo's eventual
+    // "connected", and StreamRoom's aggregation maps the stale "connecting"
+    // to "buffering" forever ("Buffering… Waiting on the video feed").
     switch (state) {
       case ConnectionState.Disconnected:
         onLiveKitState?.("disconnected");
         break;
       case ConnectionState.Connecting:
-        onLiveKitState?.("connecting");
+        // Seller needs the connecting signal for its local preview flow.
+        // Viewer: do NOT report — SellerVideo reports its own connecting.
+        if (role === "seller") onLiveKitState?.("connecting");
         break;
       case ConnectionState.Connected:
         if (role === "seller") {
-          // Seller has local video via LocalPreview; room connected = good.
           onLiveKitState?.("connected");
         }
         // Viewer: leave connected/buffering to SellerVideo.

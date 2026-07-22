@@ -232,16 +232,17 @@ export default function StreamRoom({
     // Token-fetch hard-failed (exhausted all backoffs) — keep showing Failed
     // until the parent bumps retryToken. A token-fetch backoff (reconnecting)
     // does NOT block here: during backoff `token` is null so the guard below
-    // returns before we reach this state machine. The previous guard
-    // `state === "reconnecting"` was a bug — it blocked LiveKit's own
-    // disconnected→connected transition forever, leaving the viewer stuck on
-    // "Reconnecting…" even after the room connected (audio played fine).
+    // returns before we reach this state machine.
     if (state === "failed") return;
     if (!token) return; // still fetching the token -> state already "connecting"
     if (livekitConn === "reconnecting" || livekitConn === "signalReconnecting") {
       setStateNotify("reconnecting", "Reconnecting to the live stream...");
     } else if (livekitConn === "disconnected") {
-      setStateNotify("reconnecting", "Connection dropped. Reconnecting...");
+      // Initial state is "disconnected" before VideoStage even mounts or
+      // reports anything — don't flash "Reconnecting"; stay connecting until
+      // the first real state arrives. A genuine post-connect disconnect (room
+      // was up, then dropped) does deserve reconnecting.
+      setStateNotify("connecting");
     } else if (livekitConn === "buffering" || livekitConn === "connecting") {
       setStateNotify("buffering");
     } else if (livekitConn === "connected") {
