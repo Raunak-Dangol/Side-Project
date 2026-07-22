@@ -10,7 +10,7 @@ import {
   useTracks,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 interface VideoStageProps {
   token: string;
@@ -123,6 +123,73 @@ export default function VideoStage({
   active,
   onLiveKitState,
 }: VideoStageProps) {
+  // Seller-only: we probe camera/mic permission BEFORE LiveKitRoom tries to
+  // publish. <VideoConference> + the video/audio props lean on livekit-client's
+  // implicit createLocalTracks, which swallows a NotAllowedError/NotReadableError
+  // and leaves the room pegged at "connecting" forever — the exact symptom
+  // ("connecting to stream…" that never resolves) we're debugging. By probing
+  // up front we can surface the real cause as `failed` with a useful message.
+  const [permError, setPermError] = useState<string | null>(null);
+
+  const handleError = useCallback(
+    (e: unknown) => {
+      // A hard transport error — surface it so the parent can show Failed
+      // instead of silently stalling on "connecting…".
+      console.error("[livekit] room error", e);
+      onLiveKitState?.("disconnected");
+    },
+    [onLiveKitState],
+  );
+
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- deactivation
+     * teardown: clearing a stale permission-probe result on role/active change
+     * is a lifecycle side-effect, not a render-derivable value (same pattern
+     * as StreamRoom's deactivation teardown). */
+    if (role !== "seller" || !active) {
+      // Clear any prior probe result so re-entering seller mode re-runs it.
+      setPermError(null);
+      return;
+    }
+    let cancelled = false;
+    navigator.mediaDevices
+      .getUserMedia({ video: true, audio: true })
+      // Stop the tracks immediately — LiveKit will re-acquire them on publish.
+      // This probe is purely to detect a permission/device error early.
+      .then((stream) => stream.getTracks().forEach((t) => t.stop()))
+      .catch((e: unknown) => {
+        if (cancelled) return;
+        const name = e instanceof Error ? e.name : "";
+        const msg =
+          name === "NotAllowedError"
+            ? "Camera/mic access was denied. Allow access in your browser and retry."
+            : name === "NotFoundError" || name === "OverconstrainedError"
+              ? "No camera or microphone was found on this device."
+              : name === "NotReadableError"
+                ? "Your camera or mic is in use by another app (e.g. Zoom, Teams). Close it and retry."
+                : "Couldn't access your camera or microphone.";
+        console.error("[livekit] media permission probe failed", e);
+        setPermError(msg);
+        // Tell the parent we're not connected so the resilience overlay
+        // surfaces the failure instead of idling on "connecting…".
+        onLiveKitState?.("disconnected");
+      });
+    return () => {
+      cancelled = true;
+    };
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [role, active, onLiveKitState]);
+
+  // If the seller's camera/mic is blocked, don't bother mounting LiveKitRoom
+  // (it would connecting-loop forever). The parent overlay shows the reason.
+  if (role === "seller" && permError) {
+    return (
+      <div className="flex-1 flex items-center justify-center text-slate-300 text-sm bg-slate-900 rounded p-4 text-center">
+        {permError}
+      </div>
+    );
+  }
+
   return (
     <LiveKitRoom
       token={token}
@@ -137,11 +204,7 @@ export default function VideoStage({
       className="flex flex-col h-full gap-2"
       data-lk-purpose={role}
       onDisconnected={() => onLiveKitState?.("disconnected")}
-      onError={(e) => {
-        // A hard transport error — surface it so the parent can show Failed.
-        console.error("[livekit] room error", e);
-        onLiveKitState?.("disconnected");
-      }}
+      onError={handleError}
     >
       <LiveKitStateBridge onLiveKitState={onLiveKitState} />
       {/* Seller sees the full VideoConference (their own camera controls); */}

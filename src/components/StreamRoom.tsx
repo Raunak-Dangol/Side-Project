@@ -79,17 +79,29 @@ export default function StreamRoom({
   const [state, setState] = useState<StreamConnState>(isActive ? "connecting" : "connecting");
   // LiveKit-side connection state — reported by VideoStage via onLiveKitState.
   // We aggregate it with the token-fetch state to produce `state` for the parent.
-  const [livekitConn, setLivekitConn] = useState<LiveKitConnState>("disconnected");
+  const [livekitConn, setLiveKitConn] = useState<LiveKitConnState>("disconnected");
   // Reason string surfaced for the reconnect copy ("your network" vs "creator").
   const [failReason, setFailReason] = useState<string | null>(null);
+
+  // The parent's connection-state callback is held in a ref so setStateNotify
+  // can stay identity-stable. The connection effect (below) depends on
+  // setStateNotify; if it were derived from onConnectionStateChange directly,
+  // any parent that passed an inline arrow would churn the callback's identity
+  // on every render and tear down the connection effect — unmounting VideoStage
+  // mid-handshake and looping "Client initiated disconnect". Reading via ref
+  // decouples connection lifecycle from the callback's identity entirely.
+  const onConnectionStateChangeRef = useRef(onConnectionStateChange);
+  useEffect(() => {
+    onConnectionStateChangeRef.current = onConnectionStateChange;
+  });
 
   const setStateNotify = useCallback(
     (next: StreamConnState, reason?: string) => {
       setState(next);
       if (reason !== undefined) setFailReason(reason);
-      onConnectionStateChange?.(next);
+      onConnectionStateChangeRef.current?.(next);
     },
-    [onConnectionStateChange],
+    [], // stable — reads the callback via ref, see onConnectionStateChangeRef
   );
 
   // ── Token fetch with exponential backoff ────────────────────────────────
@@ -240,7 +252,7 @@ export default function StreamRoom({
           role={role}
           roomName={stream.livekit_room_name}
           active={isActive}
-          onLiveKitState={setLivekitConn}
+          onLiveKitState={setLiveKitConn}
         />
       ) : null}
     </div>

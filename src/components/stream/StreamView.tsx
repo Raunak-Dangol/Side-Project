@@ -86,6 +86,20 @@ export default function StreamView({
   const [connState, setConnState] = useState<ConnectionState>("connecting");
   // Bumped to force StreamRoom out of a Failed state and retry the token fetch.
   const [retryToken, setRetryToken] = useState(0);
+  // Stable callbacks: StreamRoom's token-fetch + connection effect depends on
+  // onConnectionStateChange's identity (via setStateNotify → doFetch closure).
+  // An inline arrow here gets a fresh identity on every StreamView re-render —
+  // and StreamView re-renders constantly (presence syncs, chat messages,
+  // reactions all update its state). Each re-render would tear down StreamRoom's
+  // effect, unmounting VideoStage/LiveKitRoom mid-handshake → LiveKit logs
+  // "ConnectionError: Client initiated disconnect" with empty room/participant
+  // fields and the page loops disconnected → connecting → disconnected forever.
+  // Memoizing breaks the cycle: the connection survives parent state churn.
+  const handleConnectionStateChange = useCallback(
+    (s: StreamConnState) => setConnState(s),
+    [],
+  );
+  const handleRetry = useCallback(() => setRetryToken((n) => n + 1), []);
 
   // ── Presence: single source of truth for viewer count + recent-joiner stack ──
   // One channel for the whole stream; every client tracks itself and reacts to
@@ -628,7 +642,7 @@ export default function StreamView({
           viewerId={viewerId}
           viewerName={viewerName}
           active={isActive}
-          onConnectionStateChange={(s: StreamConnState) => setConnState(s)}
+          onConnectionStateChange={handleConnectionStateChange}
           retryToken={retryToken}
         />
       </div>
@@ -641,7 +655,7 @@ export default function StreamView({
       {connState !== "connected" ? (
         <ConnectionOverlay
           state={connState}
-          onRetry={() => setRetryToken((n) => n + 1)}
+          onRetry={handleRetry}
         />
       ) : null}
 
