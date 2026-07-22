@@ -258,6 +258,7 @@ export default function StreamRoom({
           serverUrl={publicEnv.livekitUrl}
           role={role}
           roomName={stream.livekit_room_name}
+          sellerId={stream.seller_id}
           active={isActive}
           onLiveKitState={setLiveKitConn}
         />

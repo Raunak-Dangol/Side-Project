@@ -1,4 +1,4 @@
-import { AccessToken, RoomServiceClient } from "livekit-server-sdk";
+import { AccessToken, RoomServiceClient, TrackSource } from "livekit-server-sdk";
 import { serverEnv } from "@/lib/env/server";
 import { publicEnv } from "@/lib/env";
 
@@ -6,7 +6,7 @@ import { publicEnv } from "@/lib/env";
  * Server-side LiveKit access token generation. NEVER call this from client code
  * — the API secret is required and must never reach the browser.
  *
- * Seller tokens can publish audio/video; viewer tokens can only subscribe.
+ * Seller tokens can publish audio/video/screen; viewer tokens can only subscribe.
  */
 export async function generateLiveKitToken(params: {
   roomName: string;
@@ -27,6 +27,18 @@ export async function generateLiveKitToken(params: {
     room: params.roomName,
     roomJoin: true,
     canPublish: params.canPublish,
+    // Explicit publish sources for sellers. When canPublish is false we omit
+    // canPublishSources so the grant doesn't accidentally open a publish path.
+    ...(params.canPublish
+      ? {
+          canPublishSources: [
+            TrackSource.CAMERA,
+            TrackSource.MICROPHONE,
+            TrackSource.SCREEN_SHARE,
+            TrackSource.SCREEN_SHARE_AUDIO,
+          ],
+        }
+      : {}),
     canSubscribe: true,
     canPublishData: false,
     canUpdateOwnMetadata: false,

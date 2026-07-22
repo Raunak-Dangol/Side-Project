@@ -680,8 +680,14 @@ export default function StreamView({
         viewerId={viewerId}
       />
 
-      {/* ── RankBadge (step 8): hourly rank pill, fed by presence count ── */}
-      <RankBadge streamId={stream.id} viewerCount={viewerCount} />
+      {/* ── RankBadge (step 8): hourly rank pill, fed by presence count ──
+          Only the stream owner may POST stats (API 403 otherwise). Pass the
+          flag so non-sellers never fire the failing request. */}
+      <RankBadge
+        streamId={stream.id}
+        viewerCount={viewerCount}
+        canReportStats={role === "seller"}
+      />
 
       {/* ── ReactionRail (step 6): heart/gift taps + live totals ── */}
       <ReactionRail streamId={stream.id} totals={reactionTotals} />
