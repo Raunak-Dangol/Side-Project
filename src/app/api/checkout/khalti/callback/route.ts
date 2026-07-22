@@ -38,14 +38,37 @@ export async function GET(request: NextRequest) {
 
   const service = createSupabaseServiceClient();
 
-  // Find the pending order by its transaction_uuid (= purchase_order_id).
-  const { data: orderRow } = await service
-    .from("orders")
-    .select("*")
-    .eq("gateway_transaction_id", parsed.purchase_order_id)
-    .eq("payment_gateway", "khalti")
-    .single();
-  const order = orderRow as Order | null;
+  // Find the order by the transaction_uuid we sent to Khalti as
+  // purchase_order_id at initiate. NOTE: gateway_transaction_id is NOT under a
+  // unique index (only khalti_pidx is, see 0006_atomic_fulfillment.sql:32-34),
+  // so `.single()` would throw on zero OR multiple matches — collapsing both
+  // legitimate "webhook raced ahead and re-linked the row" cases to a false
+  // not_found. `.maybeSingle()` returns null on zero and an error on multiple;
+  // on either, fall back to the unique khalti_pidx axis, which is the key we
+  // bound at initiate (initiate/route.ts:153-156).
+  let order: Order | null = null;
+  {
+    const { data: row, error } = await service
+      .from("orders")
+      .select("*")
+      .eq("gateway_transaction_id", parsed.purchase_order_id)
+      .eq("payment_gateway", "khalti")
+      .maybeSingle();
+    order = (row as Order | null) ?? null;
+    // Zero or ambiguous match by gateway_transaction_id -> try the unique axis.
+    // Ambiguous (multiple rows) is a sign of a retry that re-issued the same
+    // transaction_uuid; khalti_pidx disambiguates because it's unique per Khalti
+    // session and we persist it on initiate before the redirect.
+    if (!order && (error || parsed.pidx)) {
+      const { data: byPidx } = await service
+        .from("orders")
+        .select("*")
+        .eq("khalti_pidx", parsed.pidx)
+        .eq("payment_gateway", "khalti")
+        .maybeSingle();
+      order = (byPidx as Order | null) ?? null;
+    }
+  }
   if (!order) {
     return NextResponse.redirect(`${APP_URL()}/checkout/return?status=not_found`);
   }
@@ -82,10 +105,17 @@ export async function GET(request: NextRequest) {
   }
 
   // ── Amount check: reject any tampering. ──
+  // NOTE: we do NOT overwrite gateway_transaction_id here. That column is the
+  // very key this callback matches on (see the lookup above); clobbering it
+  // with Khalti's transaction_id would orphan the row from any subsequent
+  // callback for the same Khalti session (e.g. a retried redirect), causing a
+  // false not_found on replay. Khalti's authoritative transaction_id is bound
+  // to the row by `fulfill_order` via `p_transaction_id` at the success path,
+  // which is the only place it's needed.
   if (lookup.total_amount !== order.amount_cents) {
     await service
       .from("orders")
-      .update({ status: "failed", gateway_transaction_id: parsed.purchase_order_id })
+      .update({ status: "failed" })
       .eq("id", order.id);
     console.error(
       `[khalti] amount mismatch order=${order.id} expected=${order.amount_cents} got=${lookup.total_amount}`,
@@ -102,14 +132,11 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // ── Not completed: fail. ──
+  // ── Not completed: fail. Same gateway_transaction_id preservation as above. ──
   if (lookup.status !== "Completed") {
     await service
       .from("orders")
-      .update({
-        status: "failed",
-        gateway_transaction_id: lookup.transaction_id ?? parsed.purchase_order_id,
-      })
+      .update({ status: "failed" })
       .eq("id", order.id);
     return NextResponse.redirect(
       `${APP_URL()}/checkout/return?status=${encodeURIComponent(lookup.status)}&order=${order.id}`,

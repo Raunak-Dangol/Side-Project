@@ -145,6 +145,10 @@ export interface Database {
           gateway_transaction_id: string | null;
           status: "pending" | "paid" | "failed";
           amount_cents: number;
+          /** Phase 3 §4: quantity purchased (defaults to 1 for historical rows). */
+          quantity: number;
+          /** Phase 3 §4: optional shipping address as jsonb. */
+          shipping_address: Record<string, unknown> | null;
           needs_refund: boolean;
           refund_status: string | null;
           khalti_pidx: string | null;
@@ -159,6 +163,8 @@ export interface Database {
           gateway_transaction_id?: string | null;
           status?: "pending" | "paid" | "failed";
           amount_cents: number;
+          quantity?: number;
+          shipping_address?: Record<string, unknown> | null;
           needs_refund?: boolean;
           refund_status?: string | null;
           khalti_pidx?: string | null;
@@ -167,6 +173,8 @@ export interface Database {
           gateway_transaction_id?: string | null;
           status?: "pending" | "paid" | "failed";
           amount_cents?: number;
+          quantity?: number;
+          shipping_address?: Record<string, unknown> | null;
           needs_refund?: boolean;
           refund_status?: string | null;
           khalti_pidx?: string | null;
@@ -180,15 +188,19 @@ export interface Database {
           user_id: string;
           message: string;
           created_at: string;
+          /** Phase 4: soft-delete timestamp (null = visible). */
+          deleted_at: string | null;
         };
         Insert: {
           id?: string;
           stream_id: string;
           user_id: string;
           message: string;
+          deleted_at?: string | null;
         };
         Update: {
           message?: string;
+          deleted_at?: string | null;
         };
         Relationships: [
           {
@@ -359,6 +371,84 @@ export interface Database {
             columns: ["message_id"];
             isOneToOne: false;
             referencedRelation: "chat_messages";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      stream_mutes: {
+        Row: {
+          stream_id: string;
+          user_id: string;
+          muted_by: string;
+          created_at: string;
+        };
+        Insert: {
+          stream_id: string;
+          user_id: string;
+          muted_by: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "stream_mutes_stream_id_fkey";
+            columns: ["stream_id"];
+            isOneToOne: false;
+            referencedRelation: "streams";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stream_mutes_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stream_mutes_muted_by_fkey";
+            columns: ["muted_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+        ];
+      };
+      stream_bans: {
+        Row: {
+          stream_id: string;
+          user_id: string;
+          banned_by: string;
+          reason: string;
+          created_at: string;
+        };
+        Insert: {
+          stream_id: string;
+          user_id: string;
+          banned_by: string;
+          reason?: string;
+          created_at?: string;
+        };
+        Update: never;
+        Relationships: [
+          {
+            foreignKeyName: "stream_bans_stream_id_fkey";
+            columns: ["stream_id"];
+            isOneToOne: false;
+            referencedRelation: "streams";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stream_bans_user_id_fkey";
+            columns: ["user_id"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
+            referencedColumns: ["id"];
+          },
+          {
+            foreignKeyName: "stream_bans_banned_by_fkey";
+            columns: ["banned_by"];
+            isOneToOne: false;
+            referencedRelation: "profiles";
             referencedColumns: ["id"];
           },
         ];

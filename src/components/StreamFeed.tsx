@@ -48,12 +48,15 @@ export default function StreamFeed({
   const slideRefs = useRef<(HTMLElement | null)[]>([]);
 
   // Clamp activeIndex if the stream list shrinks (e.g. a stream goes offline and
-  // is removed). Guarantees `streams[activeIndex]` is always valid.
-  useEffect(() => {
-    if (activeIndex > streams.length - 1) {
-      setActiveIndex(Math.max(0, streams.length - 1));
-    }
-  }, [streams.length, activeIndex]);
+  // is removed). Guarantees `streams[activeIndex]` is always valid. This is the
+  // React "adjust state during render" escape hatch (react.dev/reference/
+  // react/useState#storing-information-from-previous-renders): the reconcile
+  // happens before `streams[activeIndex]` is ever read downstream, and React
+  // re-renders synchronously without a cascading commit-phase effect.
+  const maxIndex = Math.max(0, streams.length - 1);
+  if (activeIndex > maxIndex) {
+    setActiveIndex(maxIndex);
+  }
 
   // ── Active-slide detection: ONE IntersectionObserver over all slides ──
   // Among every currently-intersecting entry, pick the highest ratio and switch
@@ -106,23 +109,23 @@ export default function StreamFeed({
 
   const goBrowse = useCallback(() => router.push("/browse"), [router]);
 
-  // §9.A: auto-advance to the next live stream when the active one ends. The
+  // 9.A: auto-advance to the next live stream when the active one ends. The
   // StreamView of the active slide calls onEndedAdvance when its realtime
-  // subscription sees the status flip away from `live`. We delay briefly so the
-  // "stream has ended" card is readable before the swipe.
+  // subscription sees the status flip away from `live`. We advance immediately;
+  // the ended card is still readable on the outgoing slide during the swipe.
   const advanceToNext = useCallback(() => {
-    if (activeIndex >= streams.length - 1) return; // last slide — nothing to do
+    if (activeIndex >= streams.length - 1) return; // last slide, nothing to do
     const next = activeIndex + 1;
     setActiveIndex(next);
     const target = slideRefs.current[next];
     target?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activeIndex, streams.length]);
 
-  // The feed is a DISCOVERY surface: everyone watches as a viewer here, even the
-  // stream's owner. Auto-publishing a seller's camera/mic just because they
-  // scrolled onto their own stream would be a surprise privacy hazard in a
-  // TikTok-style slide (audit finding M5). Sellers go live with publish rights
-  // from their dashboard or the /stream/[id] page — not from the feed.
+  // The feed is a DISCOVERY surface: everyone watches as a viewer here, even
+  // the stream's owner. Auto-publishing a seller's camera/mic just because
+  // they scrolled onto their own stream would be a surprise privacy hazard in
+  // a TikTok-style slide (audit finding M5). Sellers go live with publish
+  // rights from their dashboard or the /stream/[id] page, not from the feed.
   const roleFor = useCallback(
     (_stream: StreamFeedItem): "seller" | "viewer" => "viewer",
     [],
@@ -169,7 +172,7 @@ export default function StreamFeed({
         type="button"
         onClick={goBrowse}
         aria-label="Browse streams"
-        className="absolute right-3 top-3 z-modal rounded-full bg-black/40 p-2 text-white/90 backdrop-blur-sm transition hover:bg-black/60"
+        className="absolute right-3 top-3 z-50 rounded-full bg-black/40 p-2 text-white/90 backdrop-blur-sm transition hover:bg-black/60"
       >
         <GridIcon />
       </button>

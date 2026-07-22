@@ -30,6 +30,7 @@ yarn-error.log*
 
 # local secret/key files that must never be committed
 tencentkey.txt
+grok.txt
 *.key
 *.secret
 

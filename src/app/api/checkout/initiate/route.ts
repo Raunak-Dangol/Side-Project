@@ -6,21 +6,44 @@ import { khaltiInitiate } from "@/lib/payments/khalti";
 import { buildEsewaFormPayload, ESEWA_FORM_URL } from "@/lib/payments/esewa";
 import { uuid } from "@/lib/utils";
 import { serverEnv } from "@/lib/env/server";
-import type { Product, Stream } from "@/lib/types";
+import type { Product, ShippingAddress, Stream } from "@/lib/types";
+
+const AddressSchema = z
+  .object({
+    name: z.string().min(1).max(120),
+    phone: z.string().min(1).max(40),
+    line1: z.string().min(1).max(300),
+    city: z.string().min(1).max(120),
+  })
+  .nullable()
+  .optional();
 
 const Body = z.object({
   productId: z.string().uuid(),
   streamId: z.string().uuid(),
   gateway: z.enum(["khalti", "esewa"]),
+  /** Phase 3 §4: quantity (1-99, clamped). Defaults to 1 for legacy clients. */
+  quantity: z.number().int().min(1).max(99).default(1),
+  /** Phase 3 §4: optional shipping address. Null/undefined = no shipping. */
+  shippingAddress: AddressSchema,
 });
 
 const APP_URL = () => serverEnv.appUrl;
+const MAX_QTY = 99;
 
 /**
  * Initiates a checkout. Creates a `pending` order row with a fresh
  * transaction_uuid BEFORE redirecting the buyer, then returns either:
- *   - Khalti: { paymentUrl }  → client redirects browser there
- *   - eSewa:  { formHtml }    → client injects + auto-submits the hidden form
+ *   - Khalti: { paymentUrl }  -> client redirects browser there
+ *   - eSewa:  { formHtml }    -> client injects + auto-submits the hidden form
+ *
+ * Phase 3 §4 — qty + address:
+ *   - Accepts `quantity` (1-99) and an optional `shippingAddress`.
+ *   - Amount is SERVER-AUTHORITATIVE: `product.price_cents * quantity`, never
+ *     read from the client. The same amount flows to Khalti/eSewa and is stored
+ *     on the order, so the callback's amount-tamper check still holds.
+ *   - Quantity is persisted so `fulfill_order` can decrement stock by it (the
+ *     RPC was upgraded in 0009 to decrement by `quantity`).
  *
  * The order is inserted via the SERVICE ROLE client (RLS would otherwise deny
  * client-side inserts on `orders` by design — only the server creates orders).
@@ -52,6 +75,13 @@ export async function POST(request: NextRequest) {
   if (product.stock <= 0) {
     return NextResponse.json({ error: "Sold out" }, { status: 409 });
   }
+  // Defend against a qty exceeding available stock at initiation. (A race can
+  // still deplete stock between initiate and fulfillment — that's the
+  // `oversold` path handled by fulfill_order.)
+  const quantity = Math.min(parsed.quantity, MAX_QTY, product.stock);
+  if (quantity < 1) {
+    return NextResponse.json({ error: "Sold out" }, { status: 409 });
+  }
 
   const { data: streamRow } = await supabase
     .from("streams")
@@ -70,10 +100,13 @@ export async function POST(request: NextRequest) {
     .eq("id", user.id)
     .single();
 
-  // Amount is taken from the DB (never from the client). eSewa requires integer
-  // rupees for some fields; both gateways use paisa for the actual amount.
-  const amount = product.price_cents;
+  // Amount is taken from the DB (never from the client) and now reflects qty.
+  // Integer paisa throughout; both gateways use paisa for the actual amount.
+  const amount = product.price_cents * quantity;
   const transactionUuid = uuid();
+
+  // Normalize the shipping address to a plain object the DB accepts, or null.
+  const shippingAddress: ShippingAddress | null = parsed.shippingAddress ?? null;
 
   // Insert a PENDING order via the service role (bypasses RLS).
   const service = createSupabaseServiceClient();
@@ -87,6 +120,10 @@ export async function POST(request: NextRequest) {
       gateway_transaction_id: transactionUuid,
       status: "pending",
       amount_cents: amount,
+      quantity,
+      // Cast through unknown: db-types models jsonb as Record<string, unknown>,
+      // but our ShippingAddress is a typed shape. The runtime value is the same.
+      shipping_address: shippingAddress as unknown as Record<string, unknown> | null,
     })
     .select("id")
     .single();
@@ -100,11 +137,15 @@ export async function POST(request: NextRequest) {
 
   try {
     if (parsed.gateway === "khalti") {
+      const returnUrl = `${APP_URL()}/api/checkout/khalti/callback`;
+      // TEMP diagnostic: confirm the env var is being read at runtime so we can
+      // tell whether Khalti was told to redirect to localhost or the tunnel URL.
+      console.log(`[khalti-initiate] APP_URL=${APP_URL()} returnUrl=${returnUrl}`);
       const initiated = await khaltiInitiate({
         amount,
         purchaseOrderId: transactionUuid,
-        purchaseOrderName: product.name,
-        returnUrl: `${APP_URL()}/api/checkout/khalti/callback`,
+        purchaseOrderName: quantity > 1 ? `${product.name} x${quantity}` : product.name,
+        returnUrl,
         buyerEmail: user.email,
         buyerName: profile?.display_name ?? user.email?.split("@")[0],
       });

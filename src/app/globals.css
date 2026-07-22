@@ -179,6 +179,36 @@ body {
   }
 }
 
+/* Gateway-card selected pop (P3-B): a quick scale pulse when a radio card is
+   selected. Reduced-motion neutralizes this via the global media query. */
+@keyframes card-pop {
+  0% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(1.02);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+/* Confetti piece fall (P3-D): each piece drifts down with a randomized
+   horizontal travel + rotation, fading out near the bottom. Driven by CSS
+   variables per-piece (--c-x, --c-rot, --c-hue, --c-duration, --c-delay).
+   Reduced-motion: the global media query collapses this to an instant state,
+   so the pieces are never visible (the success card alone conveys the win). */
+@keyframes confetti-fall {
+  0% {
+    opacity: 1;
+    transform: translate(0, 0) rotate(0deg);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--c-x, 0px), 70vh) rotate(var(--c-rot, 360deg));
+  }
+}
+
 /* ── Utilities for the immersive stream view ─────────────────────────────── */
 
 @layer utilities {
@@ -203,6 +233,28 @@ body {
   /* Reconnecting spinner — pulse-soft driven. */
   .animate-pulse-soft {
     animation: pulse-soft 1.4s ease-in-out infinite;
+  }
+
+  /* ── Phase 4 broadcast-studio dashboard layout (P4-D) ───────────
+     The seller dashboard is a two-column broadcast studio: a live
+     preview + controls on the left, tabbed telemetry / moderation /
+     catalog on the right. These helpers keep the rhythm consistent
+     with the rest of the dashboard (light theme, not the immersive
+     stream view) and reserve the preview slot for the LiveKit tile. */
+  .studio-grid {
+    @apply items-start;
+  }
+  .studio-left {
+    @apply lg:sticky lg:top-6;  /* keep the preview in view while the */
+    /* right column scrolls, on wide screens. Mobile stacks naturally. */
+  }
+  .studio-right {
+    @apply min-w-0;  /* tabs wrap with ellipsis, not grid blowout */
+  }
+  .studio-preview {
+    /* the actual LiveKit participant tile slots in here; until the
+       broadcast-quality controls land this is a reserved placeholder */
+    background-color: #0b0f19;
   }
 }
 

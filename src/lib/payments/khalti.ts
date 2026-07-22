@@ -62,11 +62,11 @@ export async function khaltiInitiate(
       purchase_order_name: params.purchaseOrderName,
       ...(params.buyerName || params.buyerEmail)
         ? {
-            customer_info: {
-              ...(params.buyerName ? { name: params.buyerName } : {}),
-              ...(params.buyerEmail ? { email: params.buyerEmail } : {}),
-            },
-          }
+          customer_info: {
+            ...(params.buyerName ? { name: params.buyerName } : {}),
+            ...(params.buyerEmail ? { email: params.buyerEmail } : {}),
+          },
+        }
         : {},
     }),
   });

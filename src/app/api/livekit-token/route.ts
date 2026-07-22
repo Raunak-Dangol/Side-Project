@@ -45,6 +45,28 @@ export async function POST(request: NextRequest) {
   const isOwner = !!user && user.id === stream.seller_id;
   const canPublish = parsed.role === "seller" && isOwner;
 
+  // Phase 4 (P4-D): reject banned viewers at token issuance. The ban route
+  // inserts into `stream_bans` BEFORE calling removeParticipant, so by the
+  // time a reconnect lands here the row is already durable — the user can't
+  // slip back in during the kick→insert window. The session client works:
+  // the `stream_bans_select_all` RLS policy is open (`using (true)`), so
+  // every viewer can read the ban list — the enforcement here is the
+  // authoritative gate, not the read.
+  if (user) {
+    const { data: banRow } = await supabase
+      .from("stream_bans")
+      .select("user_id")
+      .eq("stream_id", parsed.streamId)
+      .eq("user_id", user.id)
+      .maybeSingle();
+    if (banRow) {
+      return NextResponse.json(
+        { error: "You are banned from this stream." },
+        { status: 403 },
+      );
+    }
+  }
+
   try {
     const token = await generateLiveKitToken({
       roomName: stream.livekit_room_name,

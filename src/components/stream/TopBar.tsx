@@ -1,10 +1,10 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import Link from "next/link";
 import type { StreamFeedSeller } from "@/lib/types";
 import { initials } from "@/lib/utils";
 import FollowButton from "@/components/FollowButton";
+import Link from "next/link";
 
 export interface PresenceViewer {
   id: string;

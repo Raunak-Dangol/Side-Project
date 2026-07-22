@@ -1,8 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Confetti from "@/components/checkout/Confetti";
 
 interface ReconciliationCardProps {
+  initialStatusKey: string;
   initialTone: string;
   initialTitle: string;
   initialBody: string;
@@ -27,8 +29,14 @@ const TONE_MAP: Record<string, string> = {
  * the status poller observes the order flip out of `pending`) and swaps the
  * title/body/tone to match. Lets us avoid plumbing the poller's callbacks as
  * React props across the server/client boundary.
+ *
+ * P3-D: fires CSS confetti when the displayed status is `paid` — either on
+ * initial load (the redirect callback already confirmed payment) or when a
+ * pending order reconciles to paid via the webhook. The confetti is gated by
+ * `prefers-reduced-motion` inside the Confetti component itself.
  */
 export default function ReconciliationCard({
+  initialStatusKey,
   initialTone,
   initialTitle,
   initialBody,
@@ -37,6 +45,7 @@ export default function ReconciliationCard({
   const [tone, setTone] = useState(initialTone);
   const [title, setTitle] = useState(initialTitle);
   const [body, setBody] = useState(initialBody);
+  const [statusKey, setStatusKey] = useState(initialStatusKey);
   const [reconciled, setReconciled] = useState(false);
 
   useEffect(() => {
@@ -49,6 +58,7 @@ export default function ReconciliationCard({
       setTitle(detail.copy.title);
       setBody(detail.copy.body);
       setTone(TONE_MAP[detail.copy.tone] ?? TONE_MAP.rose);
+      setStatusKey(detail.key);
       setReconciled(true);
     };
     window.addEventListener("order-status-reconciled", handler);
@@ -57,8 +67,13 @@ export default function ReconciliationCard({
     };
   }, []);
 
+  // Fire confetti only on a paid outcome (initial or reconciled). Oversold is
+  // explicitly NOT a celebration even though the payment succeeded.
+  const paid = statusKey === "paid";
+
   return (
     <>
+      <Confetti active={paid} />
       <div className={`card border p-6 ${tone}`}>
         <h1 className="text-xl font-semibold mb-1">{title}</h1>
         <p className="text-sm opacity-90">{body}</p>

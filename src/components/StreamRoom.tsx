@@ -168,10 +168,16 @@ export default function StreamRoom({
   }, [doFetch]);
 
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect -- deactivation teardown +
+     * lifecycle kick: the token MUST drop on `active` flipping false so the
+     * stage unmounts, and the connecting signal on (re)start is the visible
+     * signal to the resilience overlay. Computing these during render would
+     * race the backoff timer cleanup above and re-mount the stage one commit
+     * late. */
     if (!isActive) {
-      // Deactivated: cancel anything pending, drop the token so VideoStage
-      // unmounts. We do NOT clear `state` here -- the parent slides this view
-      // out, so its state is irrelevant while inactive.
+      // Cancel anything pending, drop the token so VideoStage unmounts. We do
+      // NOT clear `state` here -- the parent slides this view out, so its
+      // state is irrelevant while inactive.
       abortRef.current?.abort();
       if (backoffTimerRef.current) {
         clearTimeout(backoffTimerRef.current);
@@ -197,14 +203,20 @@ export default function StreamRoom({
       attemptRef.current = { inFlight: false, count: 0 };
       setToken(null);
     };
+    /* eslint-enable react-hooks/set-state-in-effect */
     // retryToken intentionally triggers a fresh sequence on a Failed state.
     // doFetch is invoked via its ref, so it's intentionally absent from deps.
   }, [isActive, stream.id, role, viewerId, viewerName, retryToken, setStateNotify]);
 
   // ── Aggregate token-fetch + LiveKit connection states for the parent ──
   // Precedence: hard-failed token > LiveKit-side reconnecting/buffering >
-  // token connecting > connected (no overlay).
+  // token connecting > connected (no overlay). This effect both derives an
+  // aggregated state AND fires `onConnectionStateChange` to the parent as a
+  // side-effect (prop callback), so it isn't pure derivation and can't be a
+  // useMemo. The lint fires on the first setStateNotify call; a single
+  // block-level disable covers all four branches.
   useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (state === "failed" || state === "reconnecting") return; // token-fetch wins
     if (!token) return; // still fetching the token -> state already "connecting"
     if (livekitConn === "reconnecting" || livekitConn === "signalReconnecting") {
@@ -216,6 +228,7 @@ export default function StreamRoom({
     } else if (livekitConn === "connected") {
       setStateNotify("connected");
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [livekitConn, token, state, setStateNotify]);
 
   return (

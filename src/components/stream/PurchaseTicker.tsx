@@ -106,7 +106,6 @@ export default function PurchaseTicker({ streamId }: PurchaseTickerProps) {
       cancelled = true;
       clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamId]);
 
   // ── Realtime: live pills the moment a purchase lands ──────────────────────
@@ -153,7 +152,6 @@ export default function PurchaseTicker({ streamId }: PurchaseTickerProps) {
       cancelled = true;
       void removeChannelSilently(supabase, channel);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [streamId, supabase]);
 
   // ── Pill lifecycle: leave after VISIBLE_MS, unmount after +FADE_MS ────────

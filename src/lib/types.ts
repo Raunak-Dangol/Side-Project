@@ -74,6 +74,13 @@ export interface Order {
   gateway_transaction_id: string | null;
   status: OrderStatus;
   amount_cents: number;
+  /** Quantity purchased (Phase 3 §4). Defaults to 1 for historical rows. */
+  quantity: number;
+  /**
+   * Optional shipping address (Phase 3 §4). Stored as jsonb
+   * ({name, phone, line1, city}). Null for digital / pick-up-only orders.
+   */
+  shipping_address: ShippingAddress | null;
   /** Set when payment succeeded but stock was gone (money taken, no item). */
   needs_refund: boolean;
   /** Tracks manual refund handling: null | "refunded" | "reviewed". */
@@ -83,11 +90,51 @@ export interface Order {
   created_at: string;
 }
 
+/** Shipping address shape persisted on the order (Phase 3 §4). */
+export interface ShippingAddress {
+  name: string;
+  phone: string;
+  line1: string;
+  city: string;
+}
+
 export interface ChatMessage {
   id: string;
   stream_id: string;
   user_id: string;
   message: string;
+  created_at: string;
+  /**
+   * Phase 4: soft-delete timestamp. Null = visible; non-null = the seller
+   * removed it. Filtered out of reads + realtime by `is(deleted_at, null)`.
+   * Preserved (not hard-deleted) for the audit trail.
+   */
+  deleted_at: string | null;
+}
+
+/**
+ * Seller-issued mute on a stream (Phase 4 / P4-A). The muted user's future chat
+ * messages are hidden for ALL viewers of that stream — the filter lives in
+ * StreamView, fed by a realtime subscription on this table. Orthogonal to the
+ * viewer-side personal `blocks` list: BOTH filters apply.
+ */
+export interface StreamMute {
+  stream_id: string;
+  user_id: string;
+  muted_by: string;
+  created_at: string;
+}
+
+/**
+ * Seller-issued ban from a stream (Phase 4 / P4-A). The banned user is refused
+ * a LiveKit token (403 at /api/livekit-token) and kicked from the room. The
+ * table itself is the audit trail (banned_by + reason + created_at).
+ */
+export interface StreamBan {
+  stream_id: string;
+  user_id: string;
+  banned_by: string;
+  reason: string;
   created_at: string;
 }
 

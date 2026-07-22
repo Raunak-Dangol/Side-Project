@@ -105,8 +105,21 @@ export default function StreamView({
   // messages never render for the blocker. Anon viewers have no block list.
   const [blockedIds, setBlockedIds] = useState<Set<string>>(new Set());
 
+  // -- P4-A/D: seller-side stream mutes drive an ALL-VIEWERS filter. --
+  // Unlike the personal block list (applies only to the blocker), the
+  // seller muting a user hides that user's future messages for EVERY
+  // viewer of the stream -- the filter lives here, fed by a realtime
+  // subscription on `stream_mutes`. Both filters apply in combination
+  // (hidden if EITHER the blocker blocked the author OR the seller
+  // muted them).
+  const [sellerMutedIds, setSellerMutedIds] = useState<Set<string>>(new Set());
+
   useEffect(() => {
     if (!isActive || !viewerId) {
+      /* eslint-disable react-hooks/set-state-in-effect -- deactivation guard:
+       * drops the block list so a re-activation can't leak a previous viewer's
+       * blocks. The async fetch below also writes setBlockedIds, so this is the
+       * legitimate "subscribe + tear down" effect shape, not pure derivation. */
       setBlockedIds(new Set());
       return;
     }
@@ -127,17 +140,97 @@ export default function StreamView({
     };
   }, [isActive, viewerId]);
 
-  // Apply block + mute filters to the messages feeding both the bullet window
-  // and the chat log. `mutedIds` comes from the ModerationProvider below, so
-  // this component reads it via a child wrapper (see FilteredChatLog). Here we
-  // only filter on `blockedIds` (owned in this component); mute filtering is
-  // applied in the render path that has access to the moderation context.
+  // -- P4-D: subscribe to the seller's stream_mutes for THIS stream. --
+  // On activation, load the current mute list, then watch INSERT/DELETE so
+  // the seller muting someone mid-stream propagates to every viewer's
+  // filter in real time (the table is in supabase_realtime; see
+  // 0010_stream_mutes_bans.sql). Anon viewers also need this -- seller
+  // mutes apply to everyone, regardless of auth.
+  useEffect(() => {
+    if (!isActive) {
+      /* eslint-disable react-hooks/set-state-in-effect -- teardown guard: drops
+       * the seller mutes so a re-activation can't leak a previous stream's
+       * mutes. The async subscription below also writes this state, so this is
+       * the legitimate "subscribe + tear down" effect shape, not pure
+       * derivation. */
+      setSellerMutedIds(new Set());
+      return;
+    }
+    let channel: ReturnType<typeof supabase.channel> | null = null;
+    let cancelled = false;
+    (async () => {
+      const { data } = await supabase
+        .from("stream_mutes")
+        .select("user_id")
+        .eq("stream_id", stream.id);
+      if (cancelled) return;
+      setSellerMutedIds(
+        new Set(
+          ((data as { user_id: string }[] | null) ?? []).map(
+            (r) => r.user_id,
+          ),
+        ),
+      );
+
+      channel = supabase
+        .channel(`stream-mutes:${stream.id}`)
+        .on(
+          "postgres_changes",
+          {
+            event: "INSERT",
+            schema: "public",
+            table: "stream_mutes",
+            filter: `stream_id=eq.${stream.id}`,
+          },
+          (payload) => {
+            const row = payload.new as { user_id: string };
+            setSellerMutedIds((prev) => new Set(prev).add(row.user_id));
+          },
+        )
+        .on(
+          "postgres_changes",
+          {
+            event: "DELETE",
+            schema: "public",
+            table: "stream_mutes",
+            filter: `stream_id=eq.${stream.id}`,
+          },
+          (payload) => {
+            const row = payload.old as { user_id: string };
+            setSellerMutedIds((prev) => {
+              const next = new Set(prev);
+              next.delete(row.user_id);
+              return next;
+            });
+          },
+        )
+        .subscribe();
+    })();
+
+    return () => {
+      cancelled = true;
+      void removeChannelSilently(supabase, channel);
+    };
+  }, [supabase, stream.id, isActive]);
+
+  // Apply BOTH chat-hiding filters to the messages feeding the bullet window
+  // AND the chat log:
+  //   1. blockedIds      -- the viewer's OWN block list (P2-E; this viewer only)
+  //   2. sellerMutedIds  -- the SELLER's stream mutes (P4-A; ALL viewers)
+  // A message is hidden if EITHER filter matches its author. Anon viewers have
+  // no personal block list (blockedIds stays empty) but seller mutes STILL
+  // apply -- that's the whole point of seller-side moderation.
+  //
+  // The session-local mute set from ModerationProvider is separately applied
+  // in the render path (FilteredChatLog wrapper); the two client-side filters
+  // (block + session mute) stack on top of these two here.
   const visibleMessages = useMemo(
     () =>
-      viewerId
-        ? messages.filter((m) => !blockedIds.has(m.user_id))
-        : messages,
-    [messages, blockedIds, viewerId],
+      messages.filter(
+        (m) =>
+          !blockedIds.has(m.user_id) && !sellerMutedIds.has(m.user_id),
+      ),
+    [messages, blockedIds, sellerMutedIds],
   );
 
   // Newest-first window for the bullet overlay (FIFO cap lives in BulletComments).
@@ -157,6 +250,7 @@ export default function StreamView({
         .from("chat_messages")
         .select("*, profiles:profiles!user_id(id, display_name)")
         .eq("stream_id", stream.id)
+        .is("deleted_at", null)  // P4-D: drop seller-soft-deleted rows
         .order("created_at", { ascending: true })
         .limit(100);
       if (cancelled) return; // effect torn down during the await
@@ -174,6 +268,10 @@ export default function StreamView({
           },
           async (payload) => {
             const newRow = payload.new as ChatMessageWithUser;
+            // P4-D: defensively drop softly-deleted rows (the initial
+            // load filters them; an INSERT carrying a non-null
+            // deleted_at shouldn't happen but we tolerate it).
+            if (newRow.deleted_at != null) return;
             const { data: profileRow } = await supabase
               .from("profiles")
               .select("id, display_name")
@@ -183,6 +281,24 @@ export default function StreamView({
               ...prev,
               { ...newRow, profiles: profileRow ?? null },
             ]);
+          },
+        )
+        // P4-D: when the seller soft-deletes a message, the UPDATE
+        // arrives through this same channel. Drop the row from our
+        // local list so it disappears from the bullet layer + chat log
+        // for every viewer in real time.
+        .on(
+          "postgres_changes",
+          {
+            event: "UPDATE",
+            schema: "public",
+            table: "chat_messages",
+            filter: `stream_id=eq.${stream.id}`,
+          },
+          (payload) => {
+            const row = payload.new as ChatMessageWithUser;
+            if (!row.deleted_at) return;
+            setMessages((prev) => prev.filter((m) => m.id !== row.id));
           },
         )
         .subscribe();
@@ -203,6 +319,13 @@ export default function StreamView({
   const [pinnedProduct, setPinnedProduct] = useState<Product | null>(
     initialPinnedProduct,
   );
+  // If the pin is cleared, drop the cached product. "Adjust state during
+  // render" (react.dev/reference/react/useState#storing-information-from-
+  // previous-renders): cheaper than a commit-phase effect and lands before
+  // `pinnedProduct` is read in the JSX below.
+  if (!pinnedId && pinnedProduct !== null) {
+    setPinnedProduct(null);
+  }
   const [isCheckoutOpen, setIsCheckoutOpen] = useState(false);
   // Promo banner fields — kept fresh by the same streams-row subscription below.
   const [promoText, setPromoText] = useState<string | null>(
@@ -242,12 +365,10 @@ export default function StreamView({
     };
   }, [supabase, stream.id, isActive]);
 
-  // When the pinned id changes, fetch the product details.
+  // When the pinned id changes, fetch the product details. The null-clear case
+  // is handled in render above; this effect only fires the fetch.
   useEffect(() => {
-    if (!pinnedId) {
-      setPinnedProduct(null);
-      return;
-    }
+    if (!pinnedId) return;
     if (pinnedProduct?.id === pinnedId) return;
     let cancelled = false;
     (async () => {
@@ -471,12 +592,19 @@ export default function StreamView({
 
   // ── Reset ephemeral state when the stream deactivates so stale bullet ──
   // comments, reactions, and viewer counts never bleed into a re-activation.
+  // This is pure teardown — it runs exactly when `isActive` flips false and
+  // clears every realtime-mirrored slice so a re-activation starts clean. It
+  // can't be a derived value (the writes above this effect ARE the source of
+  // truth during active periods), so the effect body is the right place.
   useEffect(() => {
     if (isActive) return;
+    /* eslint-disable react-hooks/set-state-in-effect -- deactivation teardown */
     setMessages([]);
     setReactionTotals({ heart: 0, gift: 0 });
     setViewerCount(0);
     setRecentViewers([]);
+    setSellerMutedIds(new Set());
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [isActive]);
 
   return (

@@ -114,6 +114,7 @@ export default async function CheckoutReturnPage({ searchParams }: PageProps) {
   return (
     <div className="mx-auto max-w-md px-4 py-12">
       <ReconciliationCard
+        initialStatusKey={status}
         initialTone={tone}
         initialTitle={copy.title}
         initialBody={copy.body}
