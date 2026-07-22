@@ -3,14 +3,13 @@
 import {
   LiveKitRoom,
   VideoConference,
-  GridLayout,
-  ParticipantTile,
+  VideoTrack,
   RoomAudioRenderer,
   useConnectionState,
-  useTracks,
+  useRemoteParticipants,
 } from "@livekit/components-react";
 import { Track } from "livekit-client";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 
 interface VideoStageProps {
   token: string;
@@ -44,38 +43,71 @@ export type LiveKitConnState =
   | "buffering";
 
 /**
- * Minimal viewer track layout — shows the dominant speaker. Also reports a
- * "buffering" state (room connected, no subscribed track yet) so the parent's
- * §9.A overlay can show a subtle spinner instead of "waiting…" text alone.
+ * Simplified single-seller viewer video.
+ *
+ * The previous SpeakerTrack used GridLayout + useTracks({ onlySubscribed: true }),
+ * which never worked for our single-publisher model:
+ *   1. With adaptiveStream enabled, LiveKit doesn't subscribe to a camera
+ *      track until a layout context requests it. SpeakerTrack had no layout
+ *      context, so the track was never subscribed → useTracks returned []
+ *      forever → "Waiting for the seller's video…" indefinitely.
+ *   2. GridLayout's internal updatePages() pagination choked on zero tracks,
+ *      throwing and preventing any render.
+ *
+ * This component follows the architectural recommendation: directly find the
+ * remote participant whose identity starts with "seller-", grab their camera
+ * track publication, and render it with <VideoTrack manageSubscription> which
+ * explicitly subscribes to the track on mount — bypassing the adaptiveStream
+ * visibility gate that GridLayout was supposed to drive.
+ *
+ * When co-hosts / multiple publishers are added, swap this for a proper
+ * FocusLayoutContainer + GridLayout setup with a real layout context.
  */
-function SpeakerTrack({ onState }: { onState?: (s: LiveKitConnState) => void }) {
-  const tracks = useTracks(
-    [
-      { source: Track.Source.Camera, withPlaceholder: true },
-      { source: Track.Source.ScreenShare, withPlaceholder: false },
-    ],
-    { onlySubscribed: true },
+function SellerVideo({ onState }: { onState?: (s: LiveKitConnState) => void }) {
+  const participants = useRemoteParticipants();
+
+  // Sellers join with identity "seller-<viewerId>" (StreamRoom.tsx:126).
+  const seller = useMemo(
+    () => participants.find((p) => p.identity.startsWith("seller-")),
+    [participants],
   );
 
-  useEffect(() => {
-    if (tracks.length === 0) onState?.("buffering");
-    else onState?.("connected");
-  }, [tracks.length, onState]);
+  // Prefer screen share, fall back to camera.
+  const screenPub = seller?.getTrackPublication(Track.Source.ScreenShare);
+  const cameraPub = seller?.getTrackPublication(Track.Source.Camera);
+  const publication = screenPub ?? cameraPub;
 
-  if (tracks.length === 0) {
+  // Report buffering/connected to the parent's resilience overlay. The
+  // publication may start as undefined (seller hasn't published yet) or
+  // unsubscribed (manageSubscription hasn't completed); either way the
+  // viewer is still waiting, so we report "buffering".
+  useEffect(() => {
+    if (!publication || !publication.isSubscribed || !publication.track) {
+      onState?.("buffering");
+    } else {
+      onState?.("connected");
+    }
+  }, [publication, onState]);
+
+  if (!seller || !publication) {
     return (
       <div className="flex-1 flex items-center justify-center text-slate-400 text-sm bg-slate-900 rounded">
         Waiting for the seller&rsquo;s video&hellip;
       </div>
     );
   }
-  // Prefer screen share, else first camera track.
-  const main = tracks.find((t) => t.source === Track.Source.ScreenShare) ?? tracks[0]!;
+
   return (
-    <div className="flex-1 min-h-0 rounded overflow-hidden bg-black">
-      <GridLayout tracks={[main]}>
-        <ParticipantTile />
-      </GridLayout>
+    <div className="flex-1 min-h-0 rounded overflow-hidden bg-black h-full">
+      <VideoTrack
+        trackRef={{ participant: seller, publication, source: publication.source }}
+        manageSubscription
+        onSubscriptionStatusChanged={(subscribed) => {
+          if (subscribed) onState?.("connected");
+          else onState?.("buffering");
+        }}
+        className="h-full w-full object-cover"
+      />
     </div>
   );
 }
@@ -208,11 +240,11 @@ export default function VideoStage({
     >
       <LiveKitStateBridge onLiveKitState={onLiveKitState} />
       {/* Seller sees the full VideoConference (their own camera controls); */}
-      {/* viewers only see the speaker tile, which also reports buffering. */}
+      {/* viewers see the seller's camera via a direct VideoTrack (no GridLayout). */}
       {role === "seller" ? (
         <VideoConference />
       ) : (
-        <SpeakerTrack onState={onLiveKitState} />
+        <SellerVideo onState={onLiveKitState} />
       )}
 
       {/* Viewers still need to hear the seller. */}

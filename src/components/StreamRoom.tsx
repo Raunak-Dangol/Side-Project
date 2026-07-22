@@ -229,7 +229,14 @@ export default function StreamRoom({
   // block-level disable covers all four branches.
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
-    if (state === "failed" || state === "reconnecting") return; // token-fetch wins
+    // Token-fetch hard-failed (exhausted all backoffs) — keep showing Failed
+    // until the parent bumps retryToken. A token-fetch backoff (reconnecting)
+    // does NOT block here: during backoff `token` is null so the guard below
+    // returns before we reach this state machine. The previous guard
+    // `state === "reconnecting"` was a bug — it blocked LiveKit's own
+    // disconnected→connected transition forever, leaving the viewer stuck on
+    // "Reconnecting…" even after the room connected (audio played fine).
+    if (state === "failed") return;
     if (!token) return; // still fetching the token -> state already "connecting"
     if (livekitConn === "reconnecting" || livekitConn === "signalReconnecting") {
       setStateNotify("reconnecting", "Reconnecting to the live stream...");
