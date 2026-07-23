@@ -2,7 +2,6 @@
 
 import {
   LiveKitRoom,
-  VideoTrack,
   RoomAudioRenderer,
   useConnectionState,
   useLocalParticipant,
@@ -259,15 +258,12 @@ function SellerVideo({
   const sellerPresent = remotes.some((r) => r.identity === expectedIdentity);
 
   // The remote track object (RemoteVideoTrack). This is what attaches to a
-  // <video> element. May be undefined even when isSubscribed is true (Stage D).
+  // <video> element via track.attach(). May be undefined even when isSubscribed
+  // is true (Stage D). Once it exists, NativeVideo takes over and drives the
+  // overlay clear via its onPlaying/onMetadata callbacks.
   const remoteTrack = remotePub?.track as
     | import("livekit-client").RemoteTrack
     | undefined;
-  // The underlying MediaStreamTrack — its readyState must be "live" before we
-  // consider the media subscription truly complete (per acceptance criteria).
-  const mediaStreamTrack = remoteTrack?.mediaStreamTrack;
-  const mediaReady =
-    !!mediaStreamTrack && mediaStreamTrack.readyState === "live";
 
   const waitReason: ViewerWaitReason = useMemo(() => {
     if (!sellerPresent) return "seller_absent";
@@ -275,13 +271,12 @@ function SellerVideo({
     if (publication.isMuted) return "camera_muted";
     if (subError) return "subscribe_failed";
     // Stage D guard: isSubscribed alone is NOT enough. The track object must
-    // exist AND its MediaStreamTrack must be live.
-    if (!publication.isSubscribed) return "loading";
-    if (!publication.track || !mediaReady) return "loading";
+    // exist. Once it does, NativeVideo attaches and drives the overlay clear.
+    if (!publication.isSubscribed || !publication.track) return "loading";
     if (needsTap) return "tap_to_play";
-    // Ready — showVideo will render the element; this value is unused then.
+    // Ready — NativeVideo will render and drive onState("connected") on play.
     return "loading";
-  }, [sellerPresent, publication, subError, needsTap, mediaReady]);
+  }, [sellerPresent, publication, subError, needsTap]);
 
   // Explicit subscription — register the TrackSubscribed listener BEFORE
   // calling setSubscribed(true), and handle an already-subscribed track
@@ -375,8 +370,10 @@ function SellerVideo({
       return;
     }
 
-    // Stage D: isSubscribed but no live track → still buffering.
-    if (subError || !publication.isSubscribed || !publication.track || !mediaReady) {
+    // Stage D: isSubscribed but no track object → still buffering.
+    // The overlay clears via NativeVideo's onPlaying/onMetadata callback,
+    // not here — we stay buffering until the <video> actually plays.
+    if (subError || !publication.isSubscribed || !publication.track) {
       onState?.("buffering");
       return;
     }
@@ -395,68 +392,48 @@ function SellerVideo({
     remotes,
     sellerPresent,
     waitReason,
-    mediaReady,
     onState,
   ]);
 
+  // Gate on a real, attachable track. We no longer gate on mediaReady alone
+  // because the track object can be attachable before mediaStreamTrack is
+  // fully initialized — native attach handles that internally. The key test
+  // is: publication.track exists and is attachable.
   const showVideo =
     !!selected &&
     isTrackReference(selected) &&
     !!publication &&
     publication.isSubscribed &&
     !!publication.track &&
-    mediaReady &&
     !publication.isMuted;
 
   return (
     <div className="relative flex-1 min-h-0 h-full w-full overflow-hidden bg-black">
-      {showVideo && selected && isTrackReference(selected) ? (
-        <>
-          <VideoTrack
-            trackRef={selected}
-            manageSubscription
-            onSubscriptionStatusChanged={(subscribed) => {
-              logDiag("viewer", {
-                stage: subscribed ? "subscription_succeeded" : "subscription_lost",
-                trackSid: publication?.trackSid,
-              });
-              if (!subscribed) setSubError(null);
-            }}
-            onLoadedMetadata={(e) => {
-              const el = e.currentTarget;
-              logDiag("viewer", {
-                stage: "video_metadata",
-                videoWidth: el.videoWidth,
-                videoHeight: el.videoHeight,
-                hasSrcObject: Boolean(el.srcObject),
-              });
-              void el.play().then(
-                () => setNeedsTap(false),
-                (err: unknown) => {
-                  console.warn("[livekit:viewer] video play blocked", err);
-                  setNeedsTap(true);
-                },
-              );
-            }}
-            onCanPlay={() => logDiag("viewer", { stage: "video_can_play" })}
-            onPlaying={() => logDiag("viewer", { stage: "video_playing" })}
-            onError={(e) =>
-              logDiag("viewer", { stage: "video_element_error", error: String(e) })
-            }
-            playsInline
-            autoPlay
-            muted={false}
-            className="h-full w-full object-cover"
-          />
-          <NativeAttachProbe track={remoteTrack} />
-        </>
+      {showVideo && remoteTrack ? (
+        <NativeVideo
+          track={remoteTrack}
+          trackSid={publication?.trackSid}
+          onPlaying={() => {
+            logDiag("viewer", { stage: "video_playing" });
+            onState?.("connected");
+          }}
+          onMetadata={(w, h) => {
+            logDiag("viewer", {
+              stage: "video_metadata",
+              videoWidth: w,
+              videoHeight: h,
+            });
+            onState?.("connected");
+          }}
+          onPlayBlocked={() => setNeedsTap(true)}
+        />
       ) : (
         <div className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-slate-300">
           {WAIT_COPY[waitReason]}
         </div>
       )}
 
-      {needsTap && showVideo ? (
+      {needsTap && showVideo && remoteTrack ? (
         <button
           type="button"
           className="absolute inset-0 z-10 flex items-center justify-center bg-black/40 text-sm font-medium text-white"
@@ -480,54 +457,81 @@ function SellerVideo({
 }
 
 /**
- * Diagnostic-only native attach probe. If <VideoTrack> fails to render but the
- * track object is live, attaching directly to a <video> element will still
- * produce a picture — proving the track is valid and the failure is in the
- * VideoTrack/TrackReference integration (Stage E), not the subscription (D).
- * Rendered hidden (0×0) so it doesn't duplicate the VideoTrack's own element.
+ * Native video renderer using livekit-client's track.attach() directly.
+ *
+ * The @livekit/components-react <VideoTrack> component was failing to render
+ * (Stage E): subscription_succeeded and native_video_attached fired, but the
+ * VideoTrack's internal <video> element never received loadedmetadata — the
+ * TrackReference wiring was broken. This component bypasses that integration
+ * entirely and attaches the RemoteTrack directly to a real, properly-sized
+ * <video> element via the documented track.attach() API.
+ *
+ * track.attach() sets the element's srcObject to the MediaStreamTrack and
+ * handles all the RTCRtpReceiver plumbing. We just need to call play().
  */
-function NativeAttachProbe({
+function NativeVideo({
   track,
+  trackSid,
+  onPlaying,
+  onMetadata,
+  onPlayBlocked,
 }: {
-  track: import("livekit-client").RemoteTrack | undefined;
+  track: import("livekit-client").Track;
+  trackSid?: string;
+  onPlaying?: () => void;
+  onMetadata?: (width: number, height: number) => void;
+  onPlayBlocked?: () => void;
 }) {
   const videoRef = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const element = videoRef.current;
-    if (!element || !track) return;
+    if (!element) return;
 
+    logDiag("viewer", { stage: "native_video_attaching", trackSid });
+
+    let attached = false;
     try {
-      // attach() is the livekit-client method that sinks the MediaStreamTrack
-      // into the <video> element's srcObject.
       (track as { attach: (el: HTMLMediaElement) => void }).attach(element);
-      logDiag("viewer", { stage: "native_video_attached" });
+      attached = true;
+      logDiag("viewer", { stage: "native_video_attached", trackSid });
     } catch (e) {
       logDiag("viewer", {
         stage: "native_video_attach_failed",
+        trackSid,
         error: e instanceof Error ? e.message : String(e),
       });
       return;
     }
 
+    // Muted so browser autoplay policies don't block play(). Audio is handled
+    // separately by RoomAudioRenderer in VideoStage.
+    element.muted = true;
     void element
       .play()
-      .then(() => logDiag("viewer", { stage: "native_video_playing" }))
-      .catch((error: unknown) =>
+      .then(() => {
+        logDiag("viewer", { stage: "native_video_playing", trackSid });
+        onPlaying?.();
+      })
+      .catch((error: unknown) => {
         logDiag("viewer", {
           stage: "native_video_play_failed",
+          trackSid,
           error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+        });
+        onPlayBlocked?.();
+      });
 
     return () => {
-      try {
-        (track as { detach: (el: HTMLMediaElement) => void }).detach(element);
-      } catch {
-        // best-effort cleanup
+      if (attached) {
+        try {
+          (track as { detach: (el: HTMLMediaElement) => void }).detach(element);
+        } catch {
+          // best-effort cleanup
+        }
       }
     };
-  }, [track]);
+  }, [track, trackSid, onPlaying, onPlayBlocked]);
 
   return (
     <video
@@ -535,17 +539,27 @@ function NativeAttachProbe({
       autoPlay
       playsInline
       muted
-      aria-hidden
-      className="pointer-events-none absolute h-0 w-0 opacity-0"
-      onLoadedMetadata={(event) => {
-        const video = event.currentTarget;
+      className="h-full w-full object-cover"
+      onLoadedMetadata={(e) => {
+        const video = e.currentTarget;
         logDiag("viewer", {
           stage: "native_video_metadata",
+          trackSid,
           videoWidth: video.videoWidth,
           videoHeight: video.videoHeight,
           hasSrcObject: Boolean(video.srcObject),
         });
+        onMetadata?.(video.videoWidth, video.videoHeight);
       }}
+      onCanPlay={() => logDiag("viewer", { stage: "video_can_play", trackSid })}
+      onPlaying={() => logDiag("viewer", { stage: "video_playing", trackSid })}
+      onError={(e) =>
+        logDiag("viewer", {
+          stage: "video_element_error",
+          trackSid,
+          error: String(e),
+        })
+      }
     />
   );
 }
@@ -599,9 +613,9 @@ function LiveKitStateBridge({
 }
 
 /**
- * Seller local camera preview. VideoConference pulls in a multi-participant
- * grid + ControlBar we don't need for a one-seller stream; a single VideoTrack
- * of the local camera is enough and avoids GridLayout/updatePages entirely.
+ * Seller local camera preview. Uses the same NativeVideo renderer as the
+ * viewer (track.attach directly) — no VideoTrack/GridLayout needed for a
+ * one-seller stream. The local camera track comes from useTracks.
  */
 function LocalSellerPreview() {
   const tracks = useTracks(
@@ -615,22 +629,28 @@ function LocalSellerPreview() {
   if (!local || !isTrackReference(local)) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-slate-900 text-sm text-slate-300">
-        Starting your camera…
+        Starting your camera...
+      </div>
+    );
+  }
+
+  const localTrack = local.publication.track as
+    | import("livekit-client").Track
+    | undefined;
+
+  if (!localTrack) {
+    return (
+      <div className="flex h-full w-full items-center justify-center bg-slate-900 text-sm text-slate-300">
+        Starting your camera...
       </div>
     );
   }
 
   return (
-    <div className="h-full w-full overflow-hidden bg-black">
-      <VideoTrack
-        trackRef={local}
-        // Local tracks don't need subscription management.
-        playsInline
-        autoPlay
-        muted // avoid feedback; RoomAudioRenderer isn't used for sellers
-        className="h-full w-full object-cover"
-      />
-    </div>
+    <NativeVideo
+      track={localTrack}
+      trackSid={local.publication.trackSid}
+    />
   );
 }
 
