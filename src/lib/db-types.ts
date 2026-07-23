@@ -518,7 +518,7 @@ export interface Database {
       user_role: "buyer" | "admin";
       stream_status: "scheduled" | "live" | "ended";
       payment_gateway: "khalti" | "esewa";
-      order_status: "pending" | "paid" | "failed";
+      order_status: "pending" | "paid" | "failed" | "cancelled" | "expired";
     };
     CompositeTypes: {
       [_ in never]: never;

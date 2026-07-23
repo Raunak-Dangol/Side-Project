@@ -12,7 +12,7 @@ export type SellerStatus = "none" | "pending" | "approved" | "rejected";
 
 export type StreamStatus = "scheduled" | "live" | "ended";
 export type PaymentGateway = "khalti" | "esewa";
-export type OrderStatus = "pending" | "paid" | "failed";
+export type OrderStatus = "pending" | "paid" | "failed" | "cancelled" | "expired";
 
 export interface Profile {
   id: string;

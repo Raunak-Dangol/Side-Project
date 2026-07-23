@@ -103,12 +103,18 @@ export async function POST(request: NextRequest) {
   // Amount is taken from the DB (never from the client) and now reflects qty.
   // Integer paisa throughout; both gateways use paisa for the actual amount.
   const amount = product.price_cents * quantity;
+  // eSewa still needs a client-side transaction UUID for its signed payload.
+  // Khalti no longer uses this — it uses the persisted order.id as
+  // purchase_order_id (see the Khalti branch below).
   const transactionUuid = uuid();
 
   // Normalize the shipping address to a plain object the DB accepts, or null.
   const shippingAddress: ShippingAddress | null = parsed.shippingAddress ?? null;
 
   // Insert a PENDING order via the service role (bypasses RLS).
+  // gateway_transaction_id is left NULL for Khalti orders — it is set ONLY when
+  // fulfill_order binds Khalti's authoritative transaction_id. (eSewa still
+  // uses the transactionUuid as its reference, stored here for its callback.)
   const service = createSupabaseServiceClient();
   const { data: insertedRow, error: insertError } = await service
     .from("orders")
@@ -117,7 +123,7 @@ export async function POST(request: NextRequest) {
       product_id: product.id,
       stream_id: stream.id,
       payment_gateway: parsed.gateway,
-      gateway_transaction_id: transactionUuid,
+      gateway_transaction_id: parsed.gateway === "esewa" ? transactionUuid : null,
       status: "pending",
       amount_cents: amount,
       quantity,
@@ -138,26 +144,36 @@ export async function POST(request: NextRequest) {
   try {
     if (parsed.gateway === "khalti") {
       const returnUrl = `${APP_URL()}/api/checkout/khalti/callback`;
-      // TEMP diagnostic: confirm the env var is being read at runtime so we can
-      // tell whether Khalti was told to redirect to localhost or the tunnel URL.
-      console.log(`[khalti-initiate] APP_URL=${APP_URL()} returnUrl=${returnUrl}`);
+      console.log(`[khalti-initiate] APP_URL=${APP_URL()} returnUrl=${returnUrl} orderId=${orderId}`);
+      // purchase_order_id = the persisted order.id. This is the authoritative
+      // mapping: Khalti echoes it back in the lookup response, and the callback
+      // finds the order by orders.id = purchase_order_id. No fake/pre-payment
+      // gateway_transaction_id is generated for Khalti orders.
       const initiated = await khaltiInitiate({
         amount,
-        purchaseOrderId: transactionUuid,
+        purchaseOrderId: orderId,
         purchaseOrderName: quantity > 1 ? `${product.name} x${quantity}` : product.name,
         returnUrl,
         buyerEmail: user.email,
         buyerName: profile?.display_name ?? user.email?.split("@")[0],
       });
-      // Bind the pidx Khalti issued to this order NOW, so the callback can prove
-      // the returned payment belongs to this order (blocks pidx replay against a
-      // different order — audit finding H1). Storing it before the redirect also
-      // makes a duplicate/retried callback findable even if Khalti's own
-      // transaction_id differs from our transaction_uuid.
-      await service
+      // Bind the pidx Khalti issued to this order BEFORE redirecting, so the
+      // callback can always find the order by pidx (blocks pidx replay against
+      // a different order — audit finding H1). If this persistence fails, we do
+      // NOT redirect — the buyer would land on a callback that can't find the
+      // order. Mark the order failed so it's not left dangling.
+      const { error: pidxError } = await service
         .from("orders")
         .update({ khalti_pidx: initiated.pidx })
         .eq("id", orderId);
+      if (pidxError) {
+        console.error(`[khalti-initiate] pidx persistence failed order=${orderId}`, pidxError.message);
+        await service.from("orders").update({ status: "failed" }).eq("id", orderId);
+        return NextResponse.json(
+          { error: "Could not bind payment session" },
+          { status: 500 },
+        );
+      }
       return NextResponse.json({ paymentUrl: initiated.payment_url });
     }
 
@@ -176,7 +192,7 @@ export async function POST(request: NextRequest) {
     await service
       .from("orders")
       .update({ status: "failed" })
-      .eq("gateway_transaction_id", transactionUuid);
+      .eq("id", orderId);
     return NextResponse.json(
       { error: e instanceof Error ? e.message : "Gateway error" },
       { status: 502 },

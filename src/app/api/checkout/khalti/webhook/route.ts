@@ -79,8 +79,7 @@ export async function POST(request: NextRequest) {
   }
 
   // Find the order by the pidx we bound at initiation (the H1 replay-block
-  // binding). The lookup's purchase_order_id must match our
-  // gateway_transaction_id — same anti-replay guard as the redirect callback.
+  // binding). pidx is unique per Khalti session and was persisted at initiate.
   const { data: orderRow } = await service
     .from("orders")
     .select("id, gateway_transaction_id, amount_cents, status, khalti_pidx")
@@ -97,13 +96,16 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, skipped: true });
   }
 
-  // Anti-replay: pidx must still belong to THIS order.
+  // Anti-replay: the lookup echoes back the purchase_order_id we sent at
+  // initiate. For new orders that's orders.id; for legacy orders it's the old
+  // gateway_transaction_id. Accept either match.
   if (
     lookup.purchase_order_id &&
+    lookup.purchase_order_id !== order.id &&
     lookup.purchase_order_id !== order.gateway_transaction_id
   ) {
     console.error(
-      `[khalti-webhook] replay rejected order=${order.id} expected=${order.gateway_transaction_id} lookup=${lookup.purchase_order_id}`,
+      `[khalti-webhook] replay rejected order=${order.id} orderId=${order.id} gtwTxnId=${order.gateway_transaction_id} lookup=${lookup.purchase_order_id}`,
     );
     return NextResponse.json({ ok: true, skipped: true });
   }
