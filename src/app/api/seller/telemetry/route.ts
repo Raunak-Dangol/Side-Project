@@ -69,6 +69,11 @@ export async function GET(request: NextRequest) {
   // One pass: sum amount_cents + quantity, count rows, for paid orders only.
   // `.maybeSingle()` because an aggregate select with no group-by returns
   // exactly one row (null columns when there are no matching orders).
+  //
+  // If migration 0009 (which adds the `quantity` column) hasn't been applied,
+  // `sum(quantity)` fails with a 4xx/5xx from PostgREST. We fall back to a
+  // quantity-less aggregate (count + GMV only) so the telemetry panel still
+  // renders instead of 500-ing the whole route.
   const { data: agg, error: aggErr } = await service
     .from("orders")
     .select("amount_cents:sum(amount_cents), quantity:sum(quantity), count()")
@@ -76,10 +81,58 @@ export async function GET(request: NextRequest) {
     .eq("status", "paid")
     .maybeSingle();
   if (aggErr) {
-    return NextResponse.json(
-      { error: "Telemetry query failed" },
-      { status: 500 },
-    );
+    console.error("[telemetry] aggregate query failed", {
+      streamId,
+      error: aggErr.message,
+      code: aggErr.code,
+      details: aggErr.details,
+      hint: aggErr.hint,
+    });
+    // Fallback: try without the `quantity` column (pre-0009 schema).
+    const { data: aggFallback, error: fallbackErr } = await service
+      .from("orders")
+      .select("amount_cents:sum(amount_cents), count()")
+      .eq("stream_id", streamId)
+      .eq("status", "paid")
+      .maybeSingle();
+    if (fallbackErr) {
+      console.error("[telemetry] fallback aggregate also failed", {
+        streamId,
+        error: fallbackErr.message,
+        code: fallbackErr.code,
+      });
+      return NextResponse.json(
+        { error: "Telemetry query failed" },
+        { status: 500 },
+      );
+    }
+    const fallbackRow = (aggFallback ?? {}) as {
+      amount_cents: number | null;
+      count: number | null;
+    };
+    const ordersCount = fallbackRow.count ?? 0;
+    const gmvCents = fallbackRow.amount_cents ?? 0;
+    const { data: statsRowFB, error: statsErrFB } = await service
+      .from("stream_stats")
+      .select("viewer_count")
+      .eq("stream_id", streamId)
+      .maybeSingle();
+    if (statsErrFB) {
+      console.error("[telemetry] stream_stats query failed", {
+        streamId,
+        error: statsErrFB.message,
+        code: statsErrFB.code,
+      });
+    }
+    const vcFB =
+      (statsRowFB as { viewer_count: number } | null)?.viewer_count ?? 0;
+    return NextResponse.json({
+      gmv_cents: gmvCents,
+      units_sold: ordersCount, // pre-0009: 1 unit per order
+      orders_count: ordersCount,
+      conversion_rate: vcFB > 0 ? ordersCount / vcFB : 0,
+      viewer_count: vcFB,
+    });
   }
 
   // The aggregate row shape from supabase-js: the aliased sums are numeric
@@ -96,11 +149,20 @@ export async function GET(request: NextRequest) {
   // Unique viewers come from stream_stats.viewer_count (the presence-backed
   // counter maintained by StreamView). conversion_rate is paid orders over
   // unique viewers; 0 when there are no viewers (no divide-by-zero).
-  const { data: statsRow } = await service
+  const { data: statsRow, error: statsErr } = await service
     .from("stream_stats")
     .select("viewer_count")
     .eq("stream_id", streamId)
     .maybeSingle();
+  if (statsErr) {
+    console.error("[telemetry] stream_stats query failed", {
+      streamId,
+      error: statsErr.message,
+      code: statsErr.code,
+      details: statsErr.details,
+      hint: statsErr.hint,
+    });
+  }
   const viewerCount = (statsRow as { viewer_count: number } | null)?.viewer_count ?? 0;
   const conversionRate = viewerCount > 0 ? ordersCount / viewerCount : 0;
 
