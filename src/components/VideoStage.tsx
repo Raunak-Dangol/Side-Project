@@ -194,34 +194,19 @@ function SellerVideo({
 
   // Reactive track collection including unsubscribed pubs. Placeholders keep
   // the identity present even before a camera track is published.
-  // updateOnlyOn includes TrackSubscriptionStatusChanged and
-  // TrackSubscriptionPermissionChanged so the hook re-renders when the
-  // subscription we explicitly requested actually completes — without these,
-  // the viewer would render the "Buffering…" overlay even after the track
-  // arrives in the browser.
+  //
+  // NOTE: we deliberately do NOT pass updateOnlyOn. A custom updateOnlyOn
+  // REPLACES the hook's default event set, and the previous custom set was
+  // missing the event that fires when `publication.track` is assigned AFTER
+  // `isSubscribed` flips true — leaving the viewer stuck on "loading"
+  // (isSubscribed=true but track unavailable) forever. The hook's defaults
+  // already cover TrackSubscribed / TrackStreamStateChanged / etc.
   const allTracks = useTracks(
     [
       { source: Track.Source.Camera, withPlaceholder: true },
       { source: Track.Source.ScreenShare, withPlaceholder: false },
     ],
-    {
-      onlySubscribed: false,
-      updateOnlyOn: [
-        RoomEvent.TrackPublished,
-        RoomEvent.TrackUnpublished,
-        RoomEvent.TrackSubscribed,
-        RoomEvent.TrackUnsubscribed,
-        RoomEvent.TrackSubscriptionStatusChanged,
-        RoomEvent.TrackSubscriptionPermissionChanged,
-        RoomEvent.TrackSubscriptionFailed,
-        RoomEvent.TrackStreamStateChanged,
-        RoomEvent.TrackMuted,
-        RoomEvent.TrackUnmuted,
-        RoomEvent.ParticipantConnected,
-        RoomEvent.ParticipantDisconnected,
-        RoomEvent.ConnectionStateChanged,
-      ],
-    },
+    { onlySubscribed: false },
   );
 
   const sellerTracks = useMemo(
@@ -273,61 +258,103 @@ function SellerVideo({
 
   const sellerPresent = remotes.some((r) => r.identity === expectedIdentity);
 
+  // The remote track object (RemoteVideoTrack). This is what attaches to a
+  // <video> element. May be undefined even when isSubscribed is true (Stage D).
+  const remoteTrack = remotePub?.track as
+    | import("livekit-client").RemoteTrack
+    | undefined;
+  // The underlying MediaStreamTrack — its readyState must be "live" before we
+  // consider the media subscription truly complete (per acceptance criteria).
+  const mediaStreamTrack = remoteTrack?.mediaStreamTrack;
+  const mediaReady =
+    !!mediaStreamTrack && mediaStreamTrack.readyState === "live";
+
   const waitReason: ViewerWaitReason = useMemo(() => {
     if (!sellerPresent) return "seller_absent";
     if (!publication) return "waiting_camera";
     if (publication.isMuted) return "camera_muted";
     if (subError) return "subscribe_failed";
-    if (!publication.isSubscribed || !publication.track) return "loading";
+    // Stage D guard: isSubscribed alone is NOT enough. The track object must
+    // exist AND its MediaStreamTrack must be live.
+    if (!publication.isSubscribed) return "loading";
+    if (!publication.track || !mediaReady) return "loading";
     if (needsTap) return "tap_to_play";
     // Ready — showVideo will render the element; this value is unused then.
     return "loading";
-  }, [sellerPresent, publication, subError, needsTap]);
+  }, [sellerPresent, publication, subError, needsTap, mediaReady]);
 
-  // Explicit subscription — do not rely solely on VideoTrack.manageSubscription.
+  // Explicit subscription — register the TrackSubscribed listener BEFORE
+  // calling setSubscribed(true), and handle an already-subscribed track
+  // immediately after, so a fast TrackSubscribed event can't be missed.
   useEffect(() => {
     if (!remotePub) return;
-    if (remotePub.isSubscribed) return;
-    try {
-      logDiag("viewer", {
-        stage: "subscription_requested",
-        identity: expectedIdentity,
-        trackSid: remotePub.trackSid,
-        source: remotePub.source,
-      });
-      remotePub.setSubscribed(true);
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      // External-system error → UI state. Catch path of a Room API call.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setSubError(msg);
-      console.error("[livekit:viewer] setSubscribed failed", e);
-      logDiag("viewer", {
-        stage: "subscription_failed",
-        error: msg,
-        trackSid: remotePub.trackSid,
-      });
-    }
-  }, [remotePub, expectedIdentity]);
 
-  // Diagnostics + parent overlay state. Wait reason itself is derived above.
+    const onTrackSubscribed = () => {
+      logDiag("viewer", {
+        stage: "track_subscribed",
+        trackSid: remotePub.trackSid,
+        hasTrack: !!remotePub.track,
+      });
+    };
+    room.on(RoomEvent.TrackSubscribed, onTrackSubscribed);
+
+    if (remotePub.isSubscribed) {
+      // Already subscribed (e.g. adaptiveStream had it) — handle immediately.
+      logDiag("viewer", {
+        stage: "already_subscribed",
+        trackSid: remotePub.trackSid,
+        hasTrack: !!remotePub.track,
+      });
+    } else {
+      try {
+        remotePub.setSubscribed(true);
+        logDiag("viewer", {
+          stage: "subscription_request_sent",
+          trackSid: remotePub.trackSid,
+          source: remotePub.source,
+        });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setSubError(msg);
+        console.error("[livekit:viewer] setSubscribed failed", e);
+        logDiag("viewer", {
+          stage: "subscription_failed",
+          error: msg,
+          trackSid: remotePub.trackSid,
+        });
+      }
+    }
+
+    return () => {
+      room.off(RoomEvent.TrackSubscribed, onTrackSubscribed);
+    };
+  }, [room, remotePub]);
+
+  // Diagnostics + parent overlay state.
   useEffect(() => {
+    const mst = remotePub?.track?.mediaStreamTrack;
     logDiag("viewer", {
       stage: "track_scan",
       connectionState: conn,
       expectedIdentity,
       remoteIdentities: remotes.map((r) => r.identity),
-      remotes,
       waitReason,
       selected: selected
         ? {
             identity: selected.participant.identity,
             source: selected.source,
             isTrackRef: isTrackReference(selected),
-            isSubscribed: publication?.isSubscribed ?? false,
-            isMuted: publication?.isMuted ?? false,
-            hasTrack: !!publication?.track,
+            // Deep publication diagnostics — the fields that determine D vs E.
+            hasPublication: Boolean(publication),
             trackSid: publication?.trackSid,
+            isSubscribed: publication?.isSubscribed ?? false,
+            hasTrack: Boolean(publication?.track),
+            trackKind: publication?.track?.kind,
+            mediaStreamReadyState: mst?.readyState,
+            mediaStreamMuted: mst?.muted,
+            mediaStreamEnabled: mst?.enabled,
+            mediaStreamId: mst?.id,
           }
         : null,
     });
@@ -348,7 +375,8 @@ function SellerVideo({
       return;
     }
 
-    if (subError || !publication.isSubscribed || !publication.track) {
+    // Stage D: isSubscribed but no live track → still buffering.
+    if (subError || !publication.isSubscribed || !publication.track || !mediaReady) {
       onState?.("buffering");
       return;
     }
@@ -361,11 +389,13 @@ function SellerVideo({
     expectedIdentity,
     selected,
     publication,
+    remotePub,
     subError,
     needsTap,
     remotes,
     sellerPresent,
     waitReason,
+    mediaReady,
     onState,
   ]);
 
@@ -375,43 +405,51 @@ function SellerVideo({
     !!publication &&
     publication.isSubscribed &&
     !!publication.track &&
+    mediaReady &&
     !publication.isMuted;
 
   return (
     <div className="relative flex-1 min-h-0 h-full w-full overflow-hidden bg-black">
-      {showVideo ? (
-        <VideoTrack
-          trackRef={selected}
-          // manageSubscription is a backup; we already call setSubscribed above.
-          manageSubscription
-          onSubscriptionStatusChanged={(subscribed) => {
-            logDiag("viewer", {
-              stage: subscribed ? "subscription_succeeded" : "subscription_lost",
-              trackSid: publication?.trackSid,
-            });
-            if (!subscribed) setSubError(null);
-          }}
-          onLoadedMetadata={(e) => {
-            const el = e.currentTarget;
-            logDiag("viewer", {
-              stage: "video_metadata",
-              videoWidth: el.videoWidth,
-              videoHeight: el.videoHeight,
-            });
-            // Best-effort autoplay; browsers may still require a gesture.
-            void el.play().then(
-              () => setNeedsTap(false),
-              (err: unknown) => {
-                console.warn("[livekit:viewer] video play blocked", err);
-                setNeedsTap(true);
-              },
-            );
-          }}
-          playsInline
-          autoPlay
-          muted={false}
-          className="h-full w-full object-cover"
-        />
+      {showVideo && selected && isTrackReference(selected) ? (
+        <>
+          <VideoTrack
+            trackRef={selected}
+            manageSubscription
+            onSubscriptionStatusChanged={(subscribed) => {
+              logDiag("viewer", {
+                stage: subscribed ? "subscription_succeeded" : "subscription_lost",
+                trackSid: publication?.trackSid,
+              });
+              if (!subscribed) setSubError(null);
+            }}
+            onLoadedMetadata={(e) => {
+              const el = e.currentTarget;
+              logDiag("viewer", {
+                stage: "video_metadata",
+                videoWidth: el.videoWidth,
+                videoHeight: el.videoHeight,
+                hasSrcObject: Boolean(el.srcObject),
+              });
+              void el.play().then(
+                () => setNeedsTap(false),
+                (err: unknown) => {
+                  console.warn("[livekit:viewer] video play blocked", err);
+                  setNeedsTap(true);
+                },
+              );
+            }}
+            onCanPlay={() => logDiag("viewer", { stage: "video_can_play" })}
+            onPlaying={() => logDiag("viewer", { stage: "video_playing" })}
+            onError={(e) =>
+              logDiag("viewer", { stage: "video_element_error", error: String(e) })
+            }
+            playsInline
+            autoPlay
+            muted={false}
+            className="h-full w-full object-cover"
+          />
+          <NativeAttachProbe track={remoteTrack} />
+        </>
       ) : (
         <div className="flex h-full w-full items-center justify-center px-4 text-center text-sm text-slate-300">
           {WAIT_COPY[waitReason]}
@@ -438,6 +476,77 @@ function SellerVideo({
         </button>
       ) : null}
     </div>
+  );
+}
+
+/**
+ * Diagnostic-only native attach probe. If <VideoTrack> fails to render but the
+ * track object is live, attaching directly to a <video> element will still
+ * produce a picture — proving the track is valid and the failure is in the
+ * VideoTrack/TrackReference integration (Stage E), not the subscription (D).
+ * Rendered hidden (0×0) so it doesn't duplicate the VideoTrack's own element.
+ */
+function NativeAttachProbe({
+  track,
+}: {
+  track: import("livekit-client").RemoteTrack | undefined;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const element = videoRef.current;
+    if (!element || !track) return;
+
+    try {
+      // attach() is the livekit-client method that sinks the MediaStreamTrack
+      // into the <video> element's srcObject.
+      (track as { attach: (el: HTMLMediaElement) => void }).attach(element);
+      logDiag("viewer", { stage: "native_video_attached" });
+    } catch (e) {
+      logDiag("viewer", {
+        stage: "native_video_attach_failed",
+        error: e instanceof Error ? e.message : String(e),
+      });
+      return;
+    }
+
+    void element
+      .play()
+      .then(() => logDiag("viewer", { stage: "native_video_playing" }))
+      .catch((error: unknown) =>
+        logDiag("viewer", {
+          stage: "native_video_play_failed",
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+
+    return () => {
+      try {
+        (track as { detach: (el: HTMLMediaElement) => void }).detach(element);
+      } catch {
+        // best-effort cleanup
+      }
+    };
+  }, [track]);
+
+  return (
+    <video
+      ref={videoRef}
+      autoPlay
+      playsInline
+      muted
+      aria-hidden
+      className="pointer-events-none absolute h-0 w-0 opacity-0"
+      onLoadedMetadata={(event) => {
+        const video = event.currentTarget;
+        logDiag("viewer", {
+          stage: "native_video_metadata",
+          videoWidth: video.videoWidth,
+          videoHeight: video.videoHeight,
+          hasSrcObject: Boolean(video.srcObject),
+        });
+      }}
+    />
   );
 }
 
