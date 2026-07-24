@@ -54,31 +54,38 @@ export async function GET(request: NextRequest) {
 
   const service = createSupabaseServiceClient();
 
+  const incomingStatus = parsed.status ?? "none";
+  console.log(`[khalti-callback] incoming pidx=${parsed.pidx} purchase_order_id=${parsed.purchase_order_id} status=${incomingStatus}`);
+
   // ── Order lookup: primary axis = orders.id = purchase_order_id ──────────
   let order: Order | null = null;
 
   // Validate purchase_order_id as a UUID for the primary lookup.
   const poiIsUuid = z.string().uuid().safeParse(parsed.purchase_order_id).success;
   if (poiIsUuid) {
-    const { data: row } = await service
+    const { data: row, error: err1 } = await service
       .from("orders")
       .select("*")
       .eq("id", parsed.purchase_order_id)
       .eq("payment_gateway", "khalti")
       .maybeSingle();
+    console.log(`[khalti-callback] primary lookup (id) found=${!!row} err=${err1?.message ?? "none"}`);
     order = (row as Order | null) ?? null;
+  } else {
+    console.log(`[khalti-callback] primary lookup skipped (purchase_order_id not a UUID)`);
   }
 
   // ── Fallback: unique khalti_pidx axis ──────────────────────────────────
   // Works for both new and legacy orders — pidx is unique per Khalti session
   // and was persisted at initiate before the redirect.
   if (!order) {
-    const { data: byPidx } = await service
+    const { data: byPidx, error: err2 } = await service
       .from("orders")
       .select("*")
       .eq("khalti_pidx", parsed.pidx)
       .eq("payment_gateway", "khalti")
       .maybeSingle();
+    console.log(`[khalti-callback] fallback lookup (pidx) found=${!!byPidx} err=${err2?.message ?? "none"}`);
     order = (byPidx as Order | null) ?? null;
   }
 
@@ -87,21 +94,25 @@ export async function GET(request: NextRequest) {
   // sent it as purchase_order_id. Accept it ONLY if pidx matches too — the
   // fake UUID alone is insufficient proof.
   if (!order) {
-    const { data: byLegacy } = await service
+    const { data: byLegacy, error: err3 } = await service
       .from("orders")
       .select("*")
       .eq("gateway_transaction_id", parsed.purchase_order_id)
       .eq("payment_gateway", "khalti")
       .maybeSingle();
     const legacy = (byLegacy as Order | null) ?? null;
+    console.log(`[khalti-callback] legacy lookup (gtw_txn_id) found=${!!legacy} pidxMatch=${legacy?.khalti_pidx === parsed.pidx} err=${err3?.message ?? "none"}`);
     if (legacy && legacy.khalti_pidx === parsed.pidx) {
       order = legacy;
     }
   }
 
   if (!order) {
+    console.error(`[khalti-callback] ORDER NOT FOUND pidx=${parsed.pidx} purchase_order_id=${parsed.purchase_order_id}`);
     return redirect(`/checkout/return?status=not_found`);
   }
+
+  console.log(`[khalti-callback] order found id=${order.id} status=${order.status} gtw_txn_id=${order.gateway_transaction_id} pidx=${order.khalti_pidx} amount=${order.amount_cents}`);
 
   // ── pidx binding verification ──────────────────────────────────────────
   // If the order already has a pidx bound (from initiate), it MUST match the
