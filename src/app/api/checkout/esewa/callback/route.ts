@@ -6,10 +6,12 @@ import {
   esewaGetStatus,
   ESEWA_PRODUCT_CODE,
 } from "@/lib/payments/esewa";
+import { callFulfillOrder, fulfillRedirect } from "@/lib/payments/fulfill";
 import { serverEnv } from "@/lib/env/server";
 import type { Order } from "@/lib/types";
 
 const APP_URL = () => serverEnv.appUrl;
+const redirect = (path: string) => NextResponse.redirect(`${APP_URL()}${path}`);
 
 /**
  * eSewa redirect callback. Lands here with a base64 `data` param.
@@ -27,14 +29,14 @@ export async function GET(request: NextRequest) {
   const dataB64 = url.searchParams.get("data");
 
   if (!dataB64) {
-    return NextResponse.redirect(`${APP_URL()}/checkout/return?status=invalid`);
+    return redirect(`/checkout/return?status=invalid`);
   }
 
   let payload;
   try {
     payload = decodeEsewaCallback(dataB64);
   } catch {
-    return NextResponse.redirect(`${APP_URL()}/checkout/return?status=invalid`);
+    return redirect(`/checkout/return?status=invalid`);
   }
 
   const service = createSupabaseServiceClient();
@@ -48,23 +50,19 @@ export async function GET(request: NextRequest) {
     .single();
   const order = orderRow as Order | null;
   if (!order) {
-    return NextResponse.redirect(`${APP_URL()}/checkout/return?status=not_found`);
+    return redirect(`/checkout/return?status=not_found`);
   }
 
   // Idempotency.
   if (order.status === "paid") {
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=paid&order=${order.id}`,
-    );
+    return redirect(`/checkout/return?status=paid&orderId=${order.id}`);
   }
 
   // ── Check 1: signature verification (timing-safe). ──
   if (!verifyEsewaSignature(payload)) {
     await service.from("orders").update({ status: "failed" }).eq("id", order.id);
     console.error(`[esewa] signature verification failed order=${order.id}`);
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=bad_signature&order=${order.id}`,
-    );
+    return redirect(`/checkout/return?status=bad_signature&orderId=${order.id}`);
   }
 
   // ── Amount + product-code tamper check. ──
@@ -77,9 +75,7 @@ export async function GET(request: NextRequest) {
     console.error(
       `[esewa] amount/product mismatch order=${order.id} expected_amount=${expectedAmount} got_amount=${payload.total_amount}`,
     );
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=amount_mismatch&order=${order.id}`,
-    );
+    return redirect(`/checkout/return?status=amount_mismatch&orderId=${order.id}`);
   }
 
   // ── Check 2: transaction-status API (independent of signature). ──
@@ -90,46 +86,22 @@ export async function GET(request: NextRequest) {
       totalAmount: expectedAmount,
     });
   } catch {
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=lookup_failed&order=${order.id}`,
-    );
+    return redirect(`/checkout/return?status=lookup_failed&orderId=${order.id}`);
   }
 
   if (status.status.toUpperCase() === "PENDING") {
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=pending&order=${order.id}`,
-    );
+    return redirect(`/checkout/return?status=pending&orderId=${order.id}`);
   }
   if (status.status.toUpperCase() !== "COMPLETE") {
     await service.from("orders").update({ status: "failed" }).eq("id", order.id);
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=${encodeURIComponent(status.status)}&order=${order.id}`,
-    );
+    return redirect(`/checkout/return?status=${encodeURIComponent(status.status)}&orderId=${order.id}`);
   }
 
-  // ── Confirmed: atomic fulfillment (H2 fix). ──
-  // fulfill_order locks the order row, checks status (idempotent), and
-  // decrements stock inside the same transaction — so concurrent/duplicate
-  // callbacks cannot double-decrement or double-transition.
-  const { data: result } = await service.rpc("fulfill_order", {
-    p_order: order.id,
-    p_transaction_id: status.transaction_code ?? payload.transaction_uuid,
+  // ── Confirmed: atomic fulfillment ──
+  const { outcome } = await callFulfillOrder(service, {
+    orderId: order.id,
+    transactionId: status.transaction_code ?? payload.transaction_uuid,
   });
-  const outcome = (result as string | null) ?? "not_found";
 
-  if (outcome === "oversold") {
-    console.error(`[esewa] oversold order=${order.id} — needs manual refund`);
-    return NextResponse.redirect(
-      `${APP_URL()}/checkout/return?status=oversold&order=${order.id}`,
-    );
-  }
-  if (outcome === "not_found") {
-    return NextResponse.redirect(`${APP_URL()}/checkout/return?status=not_found`);
-  }
-
-  // 'paid' (this callback) or 'already_handled' (a prior callback already paid
-  // it) — either way the buyer sees a success page.
-  return NextResponse.redirect(
-    `${APP_URL()}/checkout/return?status=paid&order=${order.id}`,
-  );
+  return NextResponse.redirect(fulfillRedirect(outcome, order.id));
 }

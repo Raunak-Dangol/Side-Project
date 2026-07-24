@@ -3,6 +3,7 @@ import { z } from "zod";
 import crypto from "node:crypto";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { khaltiLookup } from "@/lib/payments/khalti";
+import { callFulfillOrder } from "@/lib/payments/fulfill";
 import { serverEnv } from "@/lib/env/server";
 import type { Order } from "@/lib/types";
 
@@ -120,12 +121,11 @@ export async function POST(request: NextRequest) {
 
   // Atomic, idempotent fulfillment. If the redirect callback already paid it,
   // `already_handled` is returned — both paths are safe to coexist.
-  const { data: result } = await service.rpc("fulfill_order", {
-    p_order: order.id,
-    p_transaction_id: lookup.transaction_id ?? order.gateway_transaction_id,
-    p_khalti_pidx: parsed.pidx,
+  const { outcome } = await callFulfillOrder(service, {
+    orderId: order.id,
+    transactionId: lookup.transaction_id ?? order.gateway_transaction_id,
+    khaltiPidx: parsed.pidx,
   });
-  const outcome = (result as string | null) ?? "not_found";
   if (outcome === "oversold") {
     console.error(`[khalti-webhook] oversold order=${order.id} — needs manual refund`);
   }

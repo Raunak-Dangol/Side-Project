@@ -8,7 +8,7 @@ import ReconciliationCard from "./ReconciliationCard";
 export const dynamic = "force-dynamic";
 
 interface PageProps {
-  searchParams: Promise<{ status?: string; order?: string }>;
+  searchParams: Promise<{ status?: string; orderId?: string }>;
 }
 
 const STATUS_COPY: Record<string, { title: string; body: string; tone: string }> = {
@@ -52,6 +52,11 @@ const STATUS_COPY: Record<string, { title: string; body: string; tone: string }>
     body: "We couldn't find an order matching this checkout.",
     tone: "rose",
   },
+  error: {
+    title: "Payment processing error",
+    body: "Something went wrong while confirming your payment. If you were charged, please contact the seller with your order ID.",
+    tone: "rose",
+  },
   invalid: {
     title: "Invalid callback",
     body: "The payment callback was missing required information.",
@@ -70,7 +75,7 @@ function statusKeyFromOrder(s: OrderStatus, needsRefund: boolean): string {
 }
 
 export default async function CheckoutReturnPage({ searchParams }: PageProps) {
-  const { status = "invalid", order: orderId } = await searchParams;
+  const { status = "invalid", orderId } = await searchParams;
   const copy = STATUS_COPY[status] ?? STATUS_COPY.invalid;
 
   const supabase = await createSupabaseServerClient();

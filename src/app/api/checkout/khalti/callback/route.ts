@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { z } from "zod";
 import { createSupabaseServiceClient } from "@/lib/supabase/server";
 import { khaltiLookup } from "@/lib/payments/khalti";
+import { callFulfillOrder, fulfillRedirect } from "@/lib/payments/fulfill";
 import { serverEnv } from "@/lib/env/server";
 import type { Order } from "@/lib/types";
 
@@ -123,12 +124,12 @@ export async function GET(request: NextRequest) {
     console.error(
       `[khalti] pidx mismatch order=${order.id} bound=${order.khalti_pidx} callback=${parsed.pidx}`,
     );
-    return redirect(`/checkout/return?status=amount_mismatch&order=${order.id}`);
+    return redirect(`/checkout/return?status=amount_mismatch&orderId=${order.id}`);
   }
 
   // Idempotency: if already reconciled, just show the result.
   if (order.status === "paid") {
-    return redirect(`/checkout/return?status=paid&order=${order.id}`);
+    return redirect(`/checkout/return?status=paid&orderId=${order.id}`);
   }
 
   // ── Authoritative lookup ───────────────────────────────────────────────
@@ -136,7 +137,7 @@ export async function GET(request: NextRequest) {
   try {
     lookup = await khaltiLookup(parsed.pidx);
   } catch {
-    return redirect(`/checkout/return?status=lookup_failed&order=${order.id}`);
+    return redirect(`/checkout/return?status=lookup_failed&orderId=${order.id}`);
   }
 
   console.log(`[khalti-callback] lookup order=${order.id} status=${lookup.status} amount=${lookup.total_amount} expected=${order.amount_cents} hasTxnId=${Boolean(lookup.transaction_id)}`);
@@ -149,7 +150,7 @@ export async function GET(request: NextRequest) {
     console.error(
       `[khalti] purchase_order_id mismatch order=${order.id} callback=${parsed.purchase_order_id} lookup=${lookup.purchase_order_id}`,
     );
-    return redirect(`/checkout/return?status=amount_mismatch&order=${order.id}`);
+    return redirect(`/checkout/return?status=amount_mismatch&orderId=${order.id}`);
   }
 
   // ── Amount check: reject any tampering. ──
@@ -158,46 +159,35 @@ export async function GET(request: NextRequest) {
     console.error(
       `[khalti] amount mismatch order=${order.id} expected=${order.amount_cents} got=${lookup.total_amount}`,
     );
-    return redirect(`/checkout/return?status=amount_mismatch&order=${order.id}`);
+    return redirect(`/checkout/return?status=amount_mismatch&orderId=${order.id}`);
   }
 
   // ── Pending: hold. Do not transition. ──
   if (lookup.status === "Pending" || lookup.status === "Initiated") {
-    return redirect(`/checkout/return?status=pending&order=${order.id}`);
+    return redirect(`/checkout/return?status=pending&orderId=${order.id}`);
   }
 
   // ── Not completed: fail. ──
   if (lookup.status !== "Completed") {
     await service.from("orders").update({ status: "failed" }).eq("id", order.id);
-    return redirect(`/checkout/return?status=${encodeURIComponent(lookup.status)}&order=${order.id}`);
+    return redirect(`/checkout/return?status=${encodeURIComponent(lookup.status)}&orderId=${order.id}`);
   }
 
   // ── Completed: require a real transaction_id ──
   if (!lookup.transaction_id) {
     console.error(`[khalti] completed but no transaction_id order=${order.id}`);
-    return redirect(`/checkout/return?status=lookup_failed&order=${order.id}`);
+    return redirect(`/checkout/return?status=lookup_failed&orderId=${order.id}`);
   }
 
   // ── Atomic fulfillment ──────────────────────────────────────────────────
   // fulfill_order locks the order row, checks status (idempotent), binds pidx,
   // decrements stock, and stores the real Khalti transaction_id as
   // gateway_transaction_id (replacing any legacy fake UUID).
-  const { data: result } = await service.rpc("fulfill_order", {
-    p_order: order.id,
-    p_transaction_id: lookup.transaction_id,
-    p_khalti_pidx: parsed.pidx,
+  const { outcome } = await callFulfillOrder(service, {
+    orderId: order.id,
+    transactionId: lookup.transaction_id,
+    khaltiPidx: parsed.pidx,
   });
-  const outcome = (result as string | null) ?? "not_found";
 
-  if (outcome === "oversold") {
-    console.error(`[khalti] oversold order=${order.id} — needs manual refund`);
-    return redirect(`/checkout/return?status=oversold&order=${order.id}`);
-  }
-  if (outcome === "not_found") {
-    return redirect(`/checkout/return?status=not_found`);
-  }
-
-  // 'paid' (this callback) or 'already_handled' (a prior callback already paid
-  // it) — either way the buyer sees a success page with the internal order ID.
-  return redirect(`/checkout/return?status=paid&order=${order.id}`);
+  return NextResponse.redirect(fulfillRedirect(outcome, order.id));
 }

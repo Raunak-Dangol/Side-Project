@@ -8,6 +8,7 @@ import {
   ESEWA_PRODUCT_CODE,
   type EsewaCallbackPayload,
 } from "@/lib/payments/esewa";
+import { callFulfillOrder } from "@/lib/payments/fulfill";
 import { serverEnv } from "@/lib/env/server";
 import type { Order } from "@/lib/types";
 
@@ -142,11 +143,10 @@ export async function POST(request: NextRequest) {
   }
 
   // Atomic, idempotent fulfillment.
-  const { data: result } = await service.rpc("fulfill_order", {
-    p_order: order.id,
-    p_transaction_id: status.transaction_code ?? order.gateway_transaction_id,
+  const { outcome } = await callFulfillOrder(service, {
+    orderId: order.id,
+    transactionId: status.transaction_code ?? order.gateway_transaction_id,
   });
-  const outcome = (result as string | null) ?? "not_found";
   if (outcome === "oversold") {
     console.error(`[esewa-webhook] oversold order=${order.id} — needs manual refund`);
   }
